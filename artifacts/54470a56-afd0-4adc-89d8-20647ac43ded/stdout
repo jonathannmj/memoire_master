@@ -1,0 +1,43 @@
+
+PLAY [PLAY 1 - GENERATE CONFIGURATIONS] ****************************************
+
+TASK [GENERATE CONFIGS FOR EACH EQUIPMENT] *************************************
+[1;35m[WARNING]: ansible-pylibssh not installed, falling back to paramiko[0m
+[1;35m[WARNING]: Deprecation warnings can be disabled by setting `deprecation_warnings=False` in ansible.cfg.[0m
+[0;35m[DEPRECATION WARNING]: Importing 'to_bytes' from 'ansible.module_utils._text' is deprecated. This feature will be removed from ansible-core version 2.24. Use ansible.module_utils.common.text.converters instead.[0m
+[0;35m[DEPRECATION WARNING]: The paramiko connection plugin is deprecated. This feature will be removed from ansible-core version 2.21.[0m
+[0;31m[ERROR]: Task failed: Error rendering template: No filter named 'ipaddr' found.[0m
+[0;31m[0m
+[0;31mTask failed.[0m
+[0;31mOrigin: /home/jonathan/Documents/master2/memoire/codes_memoire/ansible_files/playbook.yml:7:9[0m
+[0;31m[0m
+[0;31m5     gather_facts: no[0m
+[0;31m6     tasks:[0m
+[0;31m7       - name: GENERATE CONFIGS FOR EACH EQUIPMENT[0m
+[0;31m          ^ column 9[0m
+[0;31m[0m
+[0;31m<<< caused by >>>[0m
+[0;31m[0m
+[0;31mError rendering template: No filter named 'ipaddr' found.[0m
+[0;31mOrigin: /home/jonathan/Documents/master2/memoire/codes_memoire/templates/equipments/pc.j2[0m
+[0;31m[0m
+[0;31mfatal: [pc_1]: FAILED! => {"changed": false, "msg": "Task failed: Error rendering template: No filter named 'ipaddr' found."}[0m
+[0;31mfatal: [KaliLinux-1]: FAILED! => {"changed": false, "msg": "Task failed: Error rendering template: No filter named 'ipaddr' found."}[0m
+[0;31mfatal: [pc_10]: FAILED! => {"changed": false, "msg": "Task failed: Error rendering template: No filter named 'ipaddr' found."}[0m
+[0;33mchanged: [cloud_7][0m
+[0;33mchanged: [gateway_2][0m
+[0;31mfatal: [pc_3]: FAILED! => {"changed": false, "msg": "Task failed: Error rendering template: No filter named 'ipaddr' found."}[0m
+[0;31mfatal: [pc_4]: FAILED! => {"changed": false, "msg": "Task failed: Error rendering template: No filter named 'ipaddr' found."}[0m
+[0;33mchanged: [router_6][0m
+[0;33mchanged: [server_11][0m
+
+PLAY RECAP *********************************************************************
+[0;31mKaliLinux-1[0m                : ok=0    changed=0    unreachable=0    [0;31mfailed=1   [0m skipped=0    rescued=0    ignored=0   
+[0;33mcloud_7[0m                    : [0;32mok=1   [0m [0;33mchanged=1   [0m unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+[0;33mgateway_2[0m                  : [0;32mok=1   [0m [0;33mchanged=1   [0m unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+[0;31mpc_1[0m                       : ok=0    changed=0    unreachable=0    [0;31mfailed=1   [0m skipped=0    rescued=0    ignored=0   
+[0;31mpc_10[0m                      : ok=0    changed=0    unreachable=0    [0;31mfailed=1   [0m skipped=0    rescued=0    ignored=0   
+[0;31mpc_3[0m                       : ok=0    changed=0    unreachable=0    [0;31mfailed=1   [0m skipped=0    rescued=0    ignored=0   
+[0;31mpc_4[0m                       : ok=0    changed=0    unreachable=0    [0;31mfailed=1   [0m skipped=0    rescued=0    ignored=0   
+[0;33mrouter_6[0m                   : [0;32mok=1   [0m [0;33mchanged=1   [0m unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+[0;33mserver_11[0m                  : [0;32mok=1   [0m [0;33mchanged=1   [0m unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   

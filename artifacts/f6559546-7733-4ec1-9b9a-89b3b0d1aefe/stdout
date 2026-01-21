@@ -1,0 +1,56 @@
+
+PLAY [PLAY 1 - GENERATE CONFIGURATIONS] ****************************************
+
+TASK [Load variables from file] ************************************************
+[1;35m[WARNING]: Deprecation warnings can be disabled by setting `deprecation_warnings=False` in ansible.cfg.[0m
+[0;35m[DEPRECATION WARNING]: Importing 'to_bytes' from 'ansible.module_utils._text' is deprecated. This feature will be removed from ansible-core version 2.24. Use ansible.module_utils.common.text.converters instead.[0m
+[0;35m[DEPRECATION WARNING]: Importing 'to_text' from 'ansible.module_utils._text' is deprecated. This feature will be removed from ansible-core version 2.24. Use ansible.module_utils.common.text.converters instead.[0m
+[0;35m[DEPRECATION WARNING]: The `ansible.module_utils.common._collections_compat` module is deprecated. This feature will be removed from ansible-core version 2.24. Use `collections.abc` from the Python standard library instead.[0m
+[0;35m[DEPRECATION WARNING]: The paramiko connection plugin is deprecated. This feature will be removed from ansible-core version 2.21.[0m
+[0;32mok: [pc_1][0m
+[0;32mok: [pc_4][0m
+[0;32mok: [pc_10][0m
+[0;32mok: [server_11][0m
+[0;32mok: [pc_3][0m
+[0;32mok: [KaliLinux-1][0m
+[0;32mok: [gateway_2][0m
+[0;32mok: [cloud_7][0m
+[0;32mok: [router_6][0m
+
+TASK [GENERATE CONFIGS FOR EACH EQUIPMENT] *************************************
+[1;35m[WARNING]: ansible-pylibssh not installed, falling back to paramiko[0m
+[0;31m[ERROR]: Task failed: 'invent' is undefined[0m
+[0;31m[0m
+[0;31mTask failed.[0m
+[0;31mOrigin: /home/jonathan/Documents/master2/memoire/codes_memoire/ansible_files/playbook.yml:11:9[0m
+[0;31m[0m
+[0;31m 9           file: "{{ currentProjectPath }}/host_vars/{{ inventory_hostname }}.yml"[0m
+[0;31m10[0m
+[0;31m11       - name: GENERATE CONFIGS FOR EACH EQUIPMENT[0m
+[0;31m           ^ column 9[0m
+[0;31m[0m
+[0;31m<<< caused by >>>[0m
+[0;31m[0m
+[0;31m'invent' is undefined[0m
+[0;31mOrigin: /home/jonathan/Documents/master2/memoire/codes_memoire/templates/equipments/pc.j2[0m
+[0;31m[0m
+[0;31mfatal: [pc_4]: FAILED! => {"changed": false, "msg": "Task failed: 'invent' is undefined"}[0m
+[0;31mfatal: [pc_3]: FAILED! => {"changed": false, "msg": "Task failed: 'invent' is undefined"}[0m
+[0;31mfatal: [pc_1]: FAILED! => {"changed": false, "msg": "Task failed: 'invent' is undefined"}[0m
+[0;31mfatal: [pc_10]: FAILED! => {"changed": false, "msg": "Task failed: 'invent' is undefined"}[0m
+[0;31mfatal: [server_11]: FAILED! => {"changed": false, "msg": "Task failed: 'invent' is undefined"}[0m
+[0;31mfatal: [KaliLinux-1]: FAILED! => {"changed": false, "msg": "Task failed: 'invent' is undefined"}[0m
+[0;31mfatal: [gateway_2]: FAILED! => {"changed": false, "msg": "Task failed: 'invent' is undefined"}[0m
+[0;31mfatal: [cloud_7]: FAILED! => {"changed": false, "msg": "Task failed: 'invent' is undefined"}[0m
+[0;31mfatal: [router_6]: FAILED! => {"changed": false, "msg": "Task failed: 'invent' is undefined"}[0m
+
+PLAY RECAP *********************************************************************
+[0;31mKaliLinux-1[0m                : [0;32mok=1   [0m changed=0    unreachable=0    [0;31mfailed=1   [0m skipped=0    rescued=0    ignored=0   
+[0;31mcloud_7[0m                    : [0;32mok=1   [0m changed=0    unreachable=0    [0;31mfailed=1   [0m skipped=0    rescued=0    ignored=0   
+[0;31mgateway_2[0m                  : [0;32mok=1   [0m changed=0    unreachable=0    [0;31mfailed=1   [0m skipped=0    rescued=0    ignored=0   
+[0;31mpc_1[0m                       : [0;32mok=1   [0m changed=0    unreachable=0    [0;31mfailed=1   [0m skipped=0    rescued=0    ignored=0   
+[0;31mpc_10[0m                      : [0;32mok=1   [0m changed=0    unreachable=0    [0;31mfailed=1   [0m skipped=0    rescued=0    ignored=0   
+[0;31mpc_3[0m                       : [0;32mok=1   [0m changed=0    unreachable=0    [0;31mfailed=1   [0m skipped=0    rescued=0    ignored=0   
+[0;31mpc_4[0m                       : [0;32mok=1   [0m changed=0    unreachable=0    [0;31mfailed=1   [0m skipped=0    rescued=0    ignored=0   
+[0;31mrouter_6[0m                   : [0;32mok=1   [0m changed=0    unreachable=0    [0;31mfailed=1   [0m skipped=0    rescued=0    ignored=0   
+[0;31mserver_11[0m                  : [0;32mok=1   [0m changed=0    unreachable=0    [0;31mfailed=1   [0m skipped=0    rescued=0    ignored=0   

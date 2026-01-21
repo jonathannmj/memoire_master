@@ -1,0 +1,17 @@
+hostname {{ inventory_hostname }}
+!
+no ip domain lookup
+!
+{% for interface, details in interfaces.items() %}
+interface {{ interface }}
+ description Link to {{ details.neighbor | default('unknown') }}
+{% if details.portMode is defined %}
+ switchport mode {{ details.portMode }}
+{% endif %}
+{% if details.vlan is defined %}
+ switchport access vlan {{ details.vlan | replace('vlan', '') | default('1') }}
+{% endif %}
+ no shutdown
+ exit
+!
+{% endfor %}

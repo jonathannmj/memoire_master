@@ -1,0 +1,66 @@
+KaliLinux-1:
+  ansible_connection: network_cli
+  ansible_network_os: ios
+  ansible_user: <USERNAME>
+  device: pc
+  ip: 192.168.1.1/24
+cloud_7:
+  ansible_connection: network_cli
+  ansible_network_os: ios
+  ansible_user: <USERNAME>
+  device: cloud
+  interfaces: {}
+gateway_2:
+  ansible_connection: network_cli
+  ansible_network_os: ios
+  ansible_user: <USERNAME>
+  device: gateway
+  interfaces: {}
+pc_1:
+  ansible_connection: network_cli
+  ansible_network_os: ios
+  ansible_user: <USERNAME>
+  device: pc
+  ip: 192.168.1.1/24
+pc_10:
+  ansible_connection: network_cli
+  ansible_network_os: ios
+  ansible_user: <USERNAME>
+  device: pc
+  ip: 192.168.1.1/24
+pc_3:
+  ansible_connection: network_cli
+  ansible_network_os: ios
+  ansible_user: <USERNAME>
+  device: pc
+  ip: 192.168.1.1/24
+pc_4:
+  ansible_connection: network_cli
+  ansible_network_os: ios
+  ansible_user: <USERNAME>
+  device: pc
+  ip: 192.168.1.1/24
+router_6:
+  ansible_connection: network_cli
+  ansible_network_os: ios
+  ansible_user: <USERNAME>
+  device: router
+  interfaces: {}
+server_11:
+  ansible_connection: network_cli
+  ansible_network_os: ios
+  ansible_user: <USERNAME>
+  device: server
+  interfaces: {}
+'{}_8':
+  ansible_connection: network_cli
+  ansible_network_os: ios
+  ansible_user: <USERNAME>
+  device: {}
+  interfaces: {}
+'{}_9':
+  ansible_connection: network_cli
+  ansible_network_os: ios
+  ansible_user: <USERNAME>
+  device: {}
+  interfaces: {}

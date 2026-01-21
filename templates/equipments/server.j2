@@ -1,0 +1,14 @@
+hostname {{ inventory_hostname }}
+!
+{% if interfaces is defined %}
+{% for interface, details in interfaces.items() %}
+interface {{ interface }}
+{% if details.ip is defined %}
+ ip address {{ details.ip.split('/')[0] }} 255.255.255.0
+{% endif %}
+ no shutdown
+!
+{% endfor %}
+{% endif %}
+!
+ip default-gateway {{ gateway | default('') }}

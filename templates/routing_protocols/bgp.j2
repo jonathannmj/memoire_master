@@ -1,0 +1,7 @@
+router bgp {{ bgp_as }}
+{% for neighbor in bgp_neighbors %}
+ neighbor {{ neighbor.ip }} remote-as {{ neighbor.remote_as }}
+{% endfor %}
+{% for net in bgp_networks %}
+ network {{ net }} mask {{ netmask }}
+{% endfor %}

@@ -1,0 +1,5 @@
+router eigrp {{ eigrp_as }}
+{% for net in eigrp_networks %}
+ network {{ net }} {{ netmask }}
+{% endfor %}
+ no auto-summary

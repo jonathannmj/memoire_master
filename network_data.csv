@@ -1,0 +1,26 @@
+text,label
+GigabitEthernet0/1,interface
+GigabitEthernet1/0,interface
+FastEthernet0/0,interface
+Serial0/1/0,interface
+Loopback0,interface
+Vlan10,interface
+Port-channel1,interface
+TenGigabitEthernet0/2,interface
+Ethernet0/0,interface
+192.168.1.1,ip address
+10.0.0.1,ip address
+172.16.0.254,ip address
+255.255.255.0,ip address
+Router1,hostname
+SwitchA,hostname
+Firewall-01,hostname
+CoreRouter,hostname
+OSPF,protocol
+BGP,protocol
+EIGRP,protocol
+RIP,protocol
+HSRP,protocol
+VRRP,protocol
+DHCP,protocol
+NAT,protocol

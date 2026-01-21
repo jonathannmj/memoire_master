@@ -1,0 +1,48 @@
+rip:
+  rip_version: 2
+  rip_networks:
+    - 192.168.1.0
+    - 10.0.0.0
+
+eigrp:
+  eigrp_as: 100
+  eigrp_networks:
+    - 192.168.1.0
+    - 10.0.0.0
+  netmask: 0.0.0.255
+
+ospf:
+  ospf_process: 1
+  ospf_networks:
+    - 192.168.1.0
+    - 10.0.0.0
+  wildcard: 0.0.0.255
+  area: 0
+
+bgp:
+  bgp_as: 65001
+  bgp_neighbors:
+    - ip: 203.0.113.1
+      remote_as: 65002
+    - ip: 203.0.113.2
+      remote_as: 65003
+  bgp_networks:
+    - 192.168.1.0
+    - 10.0.0.0
+  netmask: 255.255.255.0
+
+static_routes:
+  - destination: 0.0.0.0
+    mask: 0.0.0.0
+    next_hop: 192.168.1.254
+  - destination: 10.0.0.0
+    mask: 255.255.255.0
+    next_hop: 192.168.2.1
+
+interfaces:
+  - name: GigabitEthernet0/0
+    ip: 192.168.1.1
+    mask: 255.255.255.0
+  - name: GigabitEthernet0/1
+    ip: 10.0.0.1
+    mask: 255.255.255.0

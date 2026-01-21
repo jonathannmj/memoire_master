@@ -1,0 +1,11 @@
+---
+  - name: PLAY 1 - GENERATE CONFIGURATIONS
+    hosts: all
+    connection: local
+    gather_facts: no
+    tasks:
+
+      - name: GENERATE CONFIGS FOR EACH EQUIPMENT
+        template:
+          src: "../templates/equipments/{{ device_type }}.j2"
+          dest: "{{ currentProjectPath }}/configurations/{{ inventory_hostname }}.cfg"
