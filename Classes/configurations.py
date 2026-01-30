@@ -10,9 +10,10 @@ from termcolor import cprint
 
 class Configurations:
     """Gestion des configurations"""
-    def __init__(self, projectFolder):
+    def __init__(self, projectFolder, data):
         self.devices = []  # List of devices with their details
         self.projectFolder = projectFolder
+        self.data = data
         self.load_devices()
 
     def load_devices(self):
@@ -91,24 +92,36 @@ class Configurations:
             host_vars['currentProjectPath'] = self.projectFolder
             
             # Special handling for PCs: map 'ip' to 'interfaces' list with 'eth0'
-            if device_type == 'pc' and 'ip' in host_vars:
-                try:
-                    # Calculate IP and Netmask using python's ipaddress module
-                    # This avoids relying on ansible filters like 'ipv4' or 'ipaddr' which might be missing
-                    if_obj = ipaddress.ip_interface(host_vars['ip'])
-                    host_vars['interfaces'] = [{
-                        'name': 'eth0',
-                        'ip': host_vars['ip'], # Keep original CIDR just in case
-                        'address': str(if_obj.ip),
-                        'netmask': str(if_obj.netmask)
-                    }]
-                except ValueError as e:
-                    print(f"Error parsing IP for {hostname}: {e}")
-                    # Fallback if parsing fails
-                    host_vars['interfaces'] = [{
-                        'name': 'eth0',
-                        'ip': host_vars['ip']
-                    }]
+            # Special handling for PCs: ensure interfaces is a list with broken down IP details
+            if device_type == 'pc':
+                # Check for IP at root (legacy) or in interfaces dict (new format)
+                ip_cidr = host_vars.get('ip')
+                iface_name = 'eth0'
+                
+                if not ip_cidr and 'interfaces' in host_vars and isinstance(host_vars['interfaces'], dict):
+                    # Find first interface with IP
+                    for key, values in host_vars['interfaces'].items():
+                        if isinstance(values, dict) and 'ip' in values:
+                            ip_cidr = values['ip']
+                            iface_name = key
+                            break
+                            
+                if ip_cidr:
+                    try:
+                        # Calculate IP and Netmask using python's ipaddress module
+                        iface_obj = ipaddress.ip_interface(ip_cidr)
+                        host_vars['interfaces'] = [{
+                            'name': iface_name,
+                            'address': str(iface_obj.ip),
+                            'netmask': str(iface_obj.netmask)
+                        }]
+                    except ValueError as e:
+                        print(f"Error parsing IP for {hostname}: {e}")
+                        # Fallback if parsing fails
+                        host_vars['interfaces'] = [{
+                            'name': iface_name,
+                            'ip': ip_cidr
+                        }]
             
             # Write host_vars to file
             host_var_path = os.path.join(host_vars_dir, f"{hostname}.yml")

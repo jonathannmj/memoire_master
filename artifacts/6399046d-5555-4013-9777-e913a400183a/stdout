@@ -1,8 +1,0 @@
-[0;31m[ERROR]: 'deprecation_warnings' is not a valid attribute for a Play[0m
-[0;31mOrigin: /home/jonathan/Documents/master2/memoire/codes_memoire/ansible_files/playbook.yml:6:5[0m
-[0;31m[0m
-[0;31m4     connection: local[0m
-[0;31m5     gather_facts: no [0m
-[0;31m6     deprecation_warnings: false[0m
-[0;31m      ^ column 5[0m
-[0;31m[0m

@@ -1,5 +1,5 @@
 <RCC>
   <qresource prefix="mainLogo">
-    <file>Network App Logo.png</file>
+    <file>app_logo.png</file>
   </qresource>
 </RCC>

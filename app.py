@@ -104,7 +104,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     def data_extraction(self):
         # The progress bar
-        self.dataDialog = DataExtraction(self)
+        self.dataDialog = DataExtractAndConfigsGen(self)
         self.progressBar = self.dataDialog.progressBar
         self.progressBar.setMinimum(0)
         self.progressBar.setMaximum(0)
@@ -371,43 +371,54 @@ class AfterExtraction(QWidget, Ui_AfterExtraction):
             title_label.setStyleSheet("font-weight: bold; font-size: 14px; margin-top: 10px;")
             container_layout.addWidget(title_label)
 
+            column_created = False
             row_data = []
             link_mapping = [] # List to store raw interface key for identification
 
             device_type = node_infos.get("device", "")
 
-            if device_type == "pc":
-                # PCs might just have 'ip' at top level
-                ip_val = node_infos.get("ip", "")
-                row_data.append(("eth0", ip_val, "", device_type)) # Assuming eth0 for PC single interface
-                link_mapping.append("eth0") # logical key
-            else:
-                # routers / switches
-                interfaces = node_infos.get("interfaces", {})
-                
-                for if_name, if_data in interfaces.items():
-                    # if_data is a dict with details
-                    ip_val = if_data.get("ip", "")
-                    
-                    # Protocol / VLAN
-                    proto_val = if_data.get("protocol", "")
-                    vlan_val = if_data.get("vlan", "")
-                    
-                    # Display string for Protocol column
-                    display_proto = ""
-                    if proto_val:
-                        display_proto = str(proto_val)
-                    if vlan_val:
-                        prefix = "VLAN: " if display_proto else "VLAN: "
-                        display_proto = f"{display_proto} | {prefix}{vlan_val}" if display_proto else f"{prefix}{vlan_val}"
+            
+            # routers / switches
+            interfaces = node_infos.get("interfaces", {})
 
-                    row_data.append((if_name, ip_val, display_proto, device_type))
-                    link_mapping.append(if_name) # Store the key used in dict
+            for if_name, if_data in interfaces.items():
+                # if_data is a dict with details
+                # ip_val = if_data.get("ip", "")
+                    
+                # # Protocol / VLAN
+                # proto_val = if_data.get("protocol", "")
+                # vlan_val = if_data.get("vlan", "")
+                
+                # # Display string for Protocol column
+                # display_proto = ""
+                # if proto_val:
+                #     display_proto = str(proto_val)
+                # if vlan_val:
+                #     prefix = "VLAN: " if display_proto else "VLAN: "
+                #     display_proto = f"{display_proto} | {prefix}{vlan_val}" if display_proto else f"{prefix}{vlan_val}"
+
+                # row_data.append((if_name, ip_val, display_proto, device_type))
+                
+                # Initialize columns default to avoid UnboundLocalError
+                columns = ['interfaces', 'ip', 'protocol'] 
+                
+                if not column_created:
+                    columns = [key for key in if_data.keys()] # Store the keys in from the interface dictionnaty as the columns names
+                    columns.insert(0, 'interfaces')
+                    column_created = True
+
+                i_data = [value for value in if_data.values()]
+                print(i_data)
+                i_data.insert(0, if_name)
+                row_data.append(i_data) # Store every interface with the data to be printed for it
+                link_mapping.append(if_name) # Store the key used in dict
+
+            print(row_data)
 
             # Create Table
             table = QTableWidget()
-            table.setColumnCount(4)
-            table.setHorizontalHeaderLabels(["Interfaces", "Ip Addresses", "Protocol", "Device Type"])
+            table.setColumnCount(len(columns))
+            table.setHorizontalHeaderLabels(columns)
             table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
             
             # Style header
@@ -416,25 +427,33 @@ class AfterExtraction(QWidget, Ui_AfterExtraction):
 
             table.setRowCount(len(row_data))
             
-            for row_idx, (if_txt, ip_txt, proto_txt, device_txt) in enumerate(row_data):
+            for row_idx, row_text in enumerate(row_data):
+                print(list(row_text))
                 # Interface
-                item_if = QTableWidgetItem(str(if_txt))
-                # Store original interface key to identify it during save
-                item_if.setData(Qt.UserRole, link_mapping[row_idx]) 
-                table.setItem(row_idx, 0, item_if)
+                # item_if = QTableWidgetItem(str(if_txt))
+                # # Store original interface key to identify it during save
+                # item_if.setData(Qt.UserRole, link_mapping[row_idx]) 
+                # table.setItem(row_idx, 0, item_if)
                 
-                # IP
-                item_ip = QTableWidgetItem(str(ip_txt))
-                table.setItem(row_idx, 1, item_ip)
+                # # IP
+                # item_ip = QTableWidgetItem(str(ip_txt))
+                # table.setItem(row_idx, 1, item_ip)
                 
-                # Protocol
-                item_proto = QTableWidgetItem(str(proto_txt))
-                table.setItem(row_idx, 2, item_proto)
+                # # Protocol
+                # item_proto = QTableWidgetItem(str(proto_txt))
+                # table.setItem(row_idx, 2, item_proto)
 
-                # Device Type
-                item_device = QTableWidgetItem(str(device_txt))
-                # item_device.setFlags(item_device.flags() ^ Qt.ItemIsEditable) # Optional: make read-only if desired
-                table.setItem(row_idx, 3, item_device)
+                # # Device Type
+                # item_device = QTableWidgetItem(str(device_txt))
+                # # item_device.setFlags(item_device.flags() ^ Qt.ItemIsEditable) # Optional: make read-only if desired
+                # table.setItem(row_idx, 3, item_device)
+
+                col = 0
+                for text in row_text:
+                    item = QTableWidgetItem(str(text))
+                    item.setData(Qt.UserRole, link_mapping[row_idx])
+                    table.setItem(row_idx, col, item)
+                    col += 1
 
             # Adjust height: header height + row height * rows + padding
             row_h = table.verticalHeader().defaultSectionSize()
@@ -515,15 +534,7 @@ class AfterExtraction(QWidget, Ui_AfterExtraction):
                     if new_vlan:
                         interfaces[target_key]['vlan'] = new_vlan
 
-        self.data = data
-
-        # Call save function
-        # try:
-        #     print(self.appData.currentProjectPath)
-        #     TopologyData().save_data_to_yaml(data, self.appData.currentProjectPath)
-        #     QMessageBox.information(self, "Succès", "Modifications appliquées et sauvegardées.")
-        # except Exception as e:
-        #     QMessageBox.critical(self, "Erreur", f"Erreur lors de la sauvegarde: {str(e)}")
+        self.data.data = data
 
     def generate_and_continue(self):
         """Generate configurations and move to the next page."""
@@ -536,48 +547,32 @@ class AfterExtraction(QWidget, Ui_AfterExtraction):
             return
 
         # Show progress dialog
-        self.dataDialog = DataExtraction(self)
-        self.dataDialog.label.setText("Starting configuration generation...")
-        self.progressBar = self.dataDialog.progressBar
+        self.configsGen = DataExtractAndConfigsGen(self)
+        self.configsGen.label.setText("Starting configuration generation...")
+        self.progressBar = self.configsGen.progressBar
         self.progressBar.setMinimum(0)
         self.progressBar.setMaximum(100) # Percentage based
         self.progressBar.setValue(0)
-        self.dataDialog.show()
+        self.configsGen.show()
 
         # Start Worker
-        self.worker = ConfigWorker(parent=None, appData=self.appData)
+        self.worker = ConfigsGenWorker(parent=None, appData=self.appData)
         self.thread = QThread()
         self.worker.moveToThread(self.thread)
         self.worker.finished.connect(self.thread.quit)
         self.worker.finished.connect(self.on_config_worker_finished)
         self.thread.started.connect(self.worker.run)
-        self.worker.message.connect(self.dataDialog.label.setText)
+        self.worker.message.connect(self.configsGen.label.setText)
         self.worker.progress.connect(self.progressBar.setValue)
         self.thread.start()
 
     def on_config_worker_finished(self):
         """Called when config worker finishes."""
-        if hasattr(self, "dataDialog") and self.dataDialog is not None:
-            self.dataDialog.close()
+        if hasattr(self, "configsGen") and self.configsGen is not None:
+            self.configsGen.close()
         
         QMessageBox.information(self, "Succès", "Configurations générées avec succès.")
         self.configsGenerated.emit(self.appData.currentProjectPath)
-
-
-
-# class OldProjectConfigs(ConfigContentPage):
-#     def __init__(self, parent=None, projectFile=None, projectFolder=None):
-#         self.projectFile = projectFile
-#         # Initialize ConfigContentPage with none first, then update
-#         super().__init__(parent, projectFolder=projectFolder)
-        
-#         if self.projectFile:
-#             self.open_project()
-        
-#     def open_project(self):
-#         self.projectFolder, self.imageFile, self.dbFile, self.configsFolder = Project().load_project(self.projectFile)
-#         # Re-initialize content now that we have projectFolder
-#         self.show_equipments()
         
 
 class ConfigsContentPage(QWidget, Ui_ConfigsContentPage):
@@ -640,7 +635,8 @@ class ConfigsContentPage(QWidget, Ui_ConfigsContentPage):
     def display_placeholder(self):
          self.configTextEdit.setText("Select an equipment to view its configuration.")
 
-class DataExtraction(QDialog, Ui_DataExtraction):
+
+class DataExtractAndConfigsGen(QDialog, Ui_DataExtraction):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUi(self)
@@ -667,11 +663,12 @@ class Worker(QObject):
         self.appData.extracted = True
         self.finished.emit()
 
-class ConfigWorker(QObject):
+
+class ConfigsGenWorker(QObject):
     def __init__(self, parent=None, appData=None):
         super().__init__(parent)
-        self.appData = appData
-        self.currentProjectPath = self.appData.currentProjectPath
+        self.data = appData.data
+        self.currentProjectPath = appData.currentProjectPath
 
     finished = Signal()
     message = Signal(str)
@@ -685,7 +682,7 @@ class ConfigWorker(QObject):
              self.progress.emit(percent)
 
         try:
-            config_gen = Configurations(self.currentProjectPath)
+            config_gen = Configurations(self.currentProjectPath, self.data)
             config_gen.generate_configurations(status_callback=callback, progress_callback=progress_callback)
             callback("Configurations generated.")
         except Exception as e:

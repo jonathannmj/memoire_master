@@ -2,15 +2,13 @@ hostname {{ inventory_hostname }}
 {% if interfaces is defined %}
 {% for interface in interfaces %}
 interface {{ interface.name }}
-{% if interface.ip is defined %}
+{% if interface.address is defined %}
  ip address {{ interface.address }} {{ interface.netmask }}
+{% elif interface.ip is defined %}
+ ip address {{ interface.ip }}
 {% endif %}
  no shutdown
 {% endfor %}
-{% elif ip is defined %}
-interface eth0
- ip address {{ ip.split('/')[0] }} 255.255.255.0
- no shutdown
 {% endif %}
 {% if gateway is defined %}
 ip default-gateway {{ gateway }}

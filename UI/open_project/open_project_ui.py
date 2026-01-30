@@ -31,6 +31,7 @@ class Ui_OpenProject(object):
         self.frame_2.setObjectName(u"frame_2")
         self.frame_2.setFrameShape(QFrame.Shape.StyledPanel)
         self.frame_2.setFrameShadow(QFrame.Shadow.Raised)
+        self.frame_2.show()
         self.gridLayout_3 = QGridLayout(self.frame_2)
         self.gridLayout_3.setObjectName(u"gridLayout_3")
         self.horizontalSpacer = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
@@ -129,13 +130,12 @@ class Ui_OpenProject(object):
 
         self.label_4 = QLabel(self.frame_2)
         self.label_4.setObjectName(u"label_4")
-        self.label_4.setPixmap(QPixmap(u":/mainLogo/Network App Logo.png"))
+        logo_pixmap = QPixmap(":/mainLogo/app_logo.png")
+        self.label_4.setPixmap(logo_pixmap)
 
         self.gridLayout_3.addWidget(self.label_4, 0, 0, 7, 1)
 
-
         self.gridLayout.addWidget(self.frame_2, 0, 0, 1, 1)
-
 
         self.retranslateUi(OpenProject)
 

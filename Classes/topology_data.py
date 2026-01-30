@@ -1,3 +1,5 @@
+import threading
+
 import numpy as np
 import math
 from ultralytics import YOLO
@@ -502,43 +504,114 @@ class TopologyData:
     def normalise_interfaces_names(self, text):
         """
         Convertit les abréviations en noms complets d'interfaces réseau.
+        Supporte: f0/0, gi0/0, s0/0, eth0, etc.
+        Gère également les erreurs OCR où '0' est lu comme 'o' ou 'O'.
         """
         substitutions = {
-            r'^Gig(\d+(/\d+){1,2})$': r'GigabitEthernet\1',
-            r'^Fa(\d+(/\d+){1,2})$': r'FastEthernet\1',
-            r'^Se(\d+(/\d+){1,3})$': r'Serial\1',
-            r'^Lo(\d+)$': r'Loopback\1',
-            r'^Vl(\d+)$': r'Vlan\1',
-            r'^Po(\d+)$': r'Port-channel\1',
-            r'^Te(\d+(/\d+){1,2})$': r'TenGigabitEthernet\1',
-            r'^e(\d+(/\d+){0,2})$': r'Ethernet\1'
+            r'(?i)^(?:GigabitEthernet|Gig|Gi|g)([\doO]+(?:/[\doO]+){1,2})$': r'GigabitEthernet\1',
+            r'(?i)^(?:FastEthernet|FastEth|Fa|fo|f)([\doO]+(?:/[\doO]+){1,2})$': r'FastEthernet\1',
+            r'(?i)^(?:TenGigabitEthernet|TenGig|Te)([\doO]+(?:/[\doO]+){1,2})$': r'TenGigabitEthernet\1',
+            r'(?i)^(?:Ethernet|Eth|e)([\doO]+(?:/[\doO]+){0,2})$': r'Ethernet\1',
+            r'(?i)^(?:Serial|Se|s)([\doO]+(?:/[\doO]+){1,3})$': r'Serial\1',
+            r'(?i)^(?:Loopback|Lo)([\doO]+)$': r'Loopback\1',
+            r'(?i)^(?:Vlan|Vl|v)([\doO]+)$': r'Vlan\1',
+            r'(?i)^(?:Port-channel|Po)([\doO]+)$': r'Port-channel\1',
         }
 
-        for pattern, remplacement in substitutions.items():
-            if re.match(pattern, text):
-                return re.sub(pattern, remplacement, text)
+        for pattern, replacement in substitutions.items():
+            match = re.match(pattern, text)
+            if match:
+                # Extract the numeric part (Always group 1)
+                numeric_part = match.group(1)
+                # Correction OCR : remplacer 'o' et 'O' par '0' uniquement dans la partie numérique
+                cleaned_numeric = numeric_part.replace('o', '0').replace('O', '0')
+                
+                # Extract the standard prefix from the replacement string
+                # e.g. r'GigabitEthernet\1' -> 'GigabitEthernet'
+                prefix = replacement.replace(r'\1', '')
+                
+                return prefix + cleaned_numeric
         return text  # Retourne tel quel si aucune correspondance
 
-    def is_valid_interface(self, text):
+    def is_interface(self, text):
         """
         Vérifie si le nom correspond à une interface réseau Cisco typique.
         """
         normalise = True
         normalText = self.normalise_interfaces_names(text) if normalise else text # Normalisation of the interface text before testing if it is a valid interface name.
         validPatterns = [
-            r'^GigabitEthernet\d+(/\d+){1,2}$',
-            r'^FastEthernet\d+(/\d+){1,2}$',
-            r'^Serial\d+(/\d+){1,3}$',
+            r'^GigabitEthernet\s?\d+(/\d+){1,2}$',
+            r'^FastEthernet\s?\d+(/\d+){1,2}$',
+            r'^Serial\s?\d+(/\d+){1,3}$',
             r'^Loopback\d+$',
-            r'^Vlan\d+$',
-            r'^Ethernet\d+(/\d+){0,2}$',
-            r'^Port-channel\d+$',
-            r'^TenGigabitEthernet\d+(/\d+){1,2}$'
+            r'^Ethernet\s?\d+(/\d+){0,2}$',
+            r'^Port-channel\s?\d+$',
+            r'^TenGigabitEthernet\s?\d+(/\d+){1,2}$'
         ]
         
         return any(re.match(pattern, normalText) for pattern in validPatterns)
+
+    def is_hostname(self, text):
+        """Checks if the text corresponds to a valid hostname."""
+        # Alphanumeric, hyphens, underscores, dots (for FQDN). Should usually start with a letter/digit.
+        pattern = r'^[a-zA-Z0-9]([a-zA-Z0-9\-\_]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-\_]{0,61}[a-zA-Z0-9])?)*$'
+        return bool(re.match(pattern, text))
+
+    def is_protocol(self, text):
+        """Checks if the text is a known network protocol."""
+        protocols = [
+            'OSPF', 'BGP', 'EIGRP', 'RIP', 'ISIS', 'HSRP', 'VRRP', 'GLBP', 
+            'STP', 'RSTP', 'MSTP', 'LACP', 'PAgP', 'DHCP', 'DNS', 'NTP', 
+            'SNMP', 'SSH', 'Telnet', 'HTTP', 'HTTPS', 'FTP', 'TFTP', 'ICMP', 
+            'TCP', 'UDP', 'GRE', 'IPsec', 'MPLS', 'LDP'
+        ]
+        return text.upper() in protocols
+
+    def is_vlan(self, text):
+        """Checks if the text looks like a VLAN identifier."""
+        # e.g., "10", "VLAN 10", "vlan100"
+        pattern = r'^(VLAN\s?)?\d{1,4}$'
+        return bool(re.match(pattern, text, re.IGNORECASE))
+
+    def is_complete_ip(self, text):
+        """Checks if the text is a complete IPv4 address (with optional CIDR)."""
+        # 4 octets
+        pattern = r'^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(/(3[0-2]|[12]?[0-9]))?$'
+        return bool(re.match(pattern, text))
+
+    def is_uncomplete_ip(self, text):
+        """Checks if the text is an incomplete IPv4 address segment."""
+        # Matches patterns like .1, .1.1, 1.2, .1/24 etc.
+        # Cases:
+        # 1. Starts with dot: .1, .1.2, .1.2.3, .1/24
+        # 2. X.Y (at least one dot) but not complete 4 octets? 
+        #    Note: 1.2 could be a version number. But in network context we might accept it.
+        #    Let's restrict "No starting dot" to at least digits.digits
+        
+        # Pattern 1: Starts with dot, followed by octet, optionally more dot-octets, optional CIDR
+        p1 = r'^\.(\d{1,3})(\.\d{1,3})*(/(3[0-2]|[12]?[0-9]))?$'
+        
+        # Pattern 2: Digits.Digits... (partial), count dots < 3 if we want to exclude full IPs? 
+        # Or just anything that looks like IP parts but isn't a full IP.
+        # Simple approach: digits-dot-digits...
+        p2 = r'^(\d{1,3}\.)+\d{1,3}(/(3[0-2]|[12]?[0-9]))?$'
+        
+        if re.match(p1, text):
+            return True
+            
+        if re.match(p2, text):
+            # Check if it is NOT a complete IP (4 octets)
+            # If it has 3 dots, it might be a complete IP.
+            if text.count('.') == 3:
+                 # This is a full IP, so not "uncomplete" in the strict sense?
+                 # But user might consider "uncomplete" category to not include full IPs.
+                 # Let's assume is_uncomplete_ip should generally return True for partials.
+                 return False
+            return True
+            
+        return False
     
-    def is_valid_ip(self, text):
+    def is_ip(self, text):
         """Verifie si le texte correspond a une adresse IP"""
 
         patterns = [
@@ -547,11 +620,11 @@ class TopologyData:
             r'\b(?:\.\d{1,3})'
         ]
 
-        validIPPatterns = re.compile(patterns)
+        validIPPatterns = re.compile('|'.join(patterns))
 
-        return text if validIPPatterns.fullmatch(text) else None
+        return validIPPatterns.fullmatch(text) 
 
-    def is_network_address(self, text):
+    def is_ip_with_mask(self, text):
         """Determine si le texte est l'adresse du reseau"""
         
         try:
@@ -559,6 +632,34 @@ class TopologyData:
             return True
         except ValueError:
             return False
+
+    def classify_text(self, texts, start, result):
+        """Classify the text"""
+        for index, text in enumerate(texts, start=start):
+            if self.is_hostname(text):
+                print(f'{text} : hostname\n')
+                result.append((index, 'hostname'))
+            elif self.is_protocol(text):
+                print(f'{text} : protocol\n')
+                result.append((index, 'protocol'))
+            elif self.is_vlan(text):
+                print(f'{text} : vlan\n')
+                result.append((index, 'vlan'))
+            elif self.is_ip(text):
+                print(f'{text} : ip\n')
+                result.append((index, 'ip'))
+            elif self.is_ip_with_mask(text):
+                print(f'{text} : ip\n')
+                result.append((index, 'ip'))
+            elif self.is_uncomplete_ip(text):
+                print(f'{text} : uncomplete ip')
+                result.append((index, 'uncomplete_ip'))
+            elif self.is_interface(text):
+                print(f'{text} : interface\n')
+                result.append((index, 'interface'))
+            else:
+                print(f'{text} : other\n')
+                result.append((index, 'other'))
 
     def map_links_to_port_text(self):
         """Lie chaque extremite d'un lien avec le texte qui s'y rapporte"""
@@ -638,7 +739,7 @@ class TopologyData:
             if links:
                 links = set(links)  # Remove duplicates
                 for link in links:
-                    zoneWithLinks[index].append((link[0], link[1])) # Save the link index, and the coordinates of the point of the link that is close to the zone in the zone's index.
+                    zoneWithLinks[index].append((link[0], link[1]))
         
         self.zoneWithLinks = zoneWithLinks
 
@@ -703,6 +804,39 @@ class TopologyData:
         """Create links between zones and lines"""
         pass
 
+    def OCR_on_detected_equipments_zones(self):
+        """Perform OCR on the detected equipments on the image and save the results in the database"""
+
+        # Chargement de l'image
+        image = cv2.imread(self.imagePath)
+
+        # OCR on each detected zone
+        # Or Targeted OCR
+        self.extractedTextForEquipmentZones = self.targeted_OCR(image, self.detectedZones, "equipement")
+        # cprint('OCR on equipment text', 'yellow')
+        # print(self.extractedTextForEquipmentZones)
+
+    def OCR_on_detected_text_zones(self):
+        """OCR on detected zones of text"""
+
+        # Detection des zones de texte
+        self.detect_other_text("best.pt")
+
+        imagePath = self.imagePath
+        detectedTextZones = self.detectedTextZones
+
+        image = cv2.imread(imagePath)
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+        # Binarisation
+        _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+
+        # OCR on each detected zone
+        # Or Targeted OCR
+        extractedTextForLinks = self.targeted_OCR(image, detectedTextZones, "links")
+
+        self.link_text_to_links(extractedTextForLinks)
+
     def targeted_OCR(self, image, zones, type):
         """Realise un OCR cible sur les differentes zones detectees
         Retourne: {zone_index: {ocr_index: {'text': str, 'coordinates': (x,y,w,h), 'class': None}, ...}, ...}
@@ -727,57 +861,81 @@ class TopologyData:
 
         # Flatten texts for classification
         texts = [cell['text'] for sub in extractedText.values() for cell in sub.values()]
-        if texts:
-            classes = self.text_classification(texts)  # pass list of texts
-            # classes should be a list of dicts like [{'label':..., 'score':...}, ...]
-            count = 0
-            for subdict in extractedText.values():
-                for data in subdict.values():
-                    try:
-                        data['class'] = classes[count]['label']
-                        data['score'] = classes[count]['score']
-                    except Exception:
-                        data['class'] = None
-                    count += 1
+
+        # if texts:
+        #     classes = self.text_classification(texts)  # pass list of texts
+        #     # classes should be a list of dicts like [{'label':..., 'score':...}, ...]
+        #     count = 0
+        #     for subdict in extractedText.values():
+        #         for data in subdict.values():
+        #             try:
+        #                 data['class'] = classes[count]['label']
+        #                 data['score'] = classes[count]['score']
+        #             except Exception:
+        #                 data['class'] = None
+        #             count += 1
 
         # #TODO: Remove the print()
         # cprint("Extracted Text in targeted OCR", 'red')
         # print(extractedText)
         # cprint("------------------------------\n", 'red')
 
-        return extractedText
+        #@#@# Second Idea
 
-    def OCR_on_detected_equipments_zones(self):
-        """Perform OCR on the detected equipments on the image and save the results in the database"""
+        def classify():
+            length = len(texts)
+            step = length // 4  # Divide the list of texts by four
 
-        # Chargement de l'image
-        image = cv2.imread(self.imagePath)
+            # Lists where to store the data for the text_classification
+            result1 = []
+            result2 = []
+            result3 = []
+            result4 = []
 
-        # OCR on each detected zone
-        # Or Targeted OCR
-        self.extractedTextForEquipmentZones = self.targeted_OCR(image, self.detectedZones, "equipement")
-        print(self.extractedTextForEquipmentZones)
-
-    def OCR_on_detected_text_zones(self):
-        """OCR on detected zones of text"""
-
-        # Detection des zones de texte
-        self.detect_other_text("best.pt")
-
-        imagePath = self.imagePath
-        detectedTextZones = self.detectedTextZones
-
-        image = cv2.imread(imagePath)
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-        # Binarisation
-        _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
-
-        # OCR on each detected zone
-        # Or Targeted OCR
-        extractedTextForLinks = self.targeted_OCR(image, detectedTextZones, "links")
-
-        self.link_text_to_links(extractedTextForLinks)
+            # Create a thread to do the classification on each part of the list
+            thread_1 = threading.Thread(target=self.classify_text, args=(texts[0:step], 0, result1,))
+            thread_2 = threading.Thread(target=self.classify_text, args=(texts[step:step*2], step, result2,))
+            thread_3 = threading.Thread(target=self.classify_text, args=(texts[step*2:step*3], step*2, result3,))
+            thread_4 = threading.Thread(target=self.classify_text, args=(texts[step*3:length], step*3, result4,))
+            
+            # Start the threads
+            thread_1.start()
+            thread_2.start()
+            thread_3.start()
+            thread_4.start()
+            
+            # Wait for all the threads to finish their work before continuing
+            thread_1.join()
+            thread_2.join()
+            thread_3.join()
+            thread_4.join()
+            
+            cprint("Print results from threads", 'blue')
+            print(result1)
+            print(result2)
+            print(result3)
+            print(result4)
+            cprint("____________________________\n")
+            
+            results = result1 + result2 + result3 + result4
+            index = 0
+            for subdict in extractedText.values():
+                    for data in subdict.values():
+                        if 'fo/0' in data['text']:
+                            data['text'] = 'f0/0'
+                            data['class'] = results[index][1]
+                        else:
+                            data['class'] = results[index][1]
+                        index += 1
+            
+            return extractedText
+        
+        if texts:
+            extracted_and_classified_text = classify()
+            print(extracted_and_classified_text)
+            return extracted_and_classified_text
+        else:
+            return None
     
     def closest_to_the_link(self, link):
         """Determine la distance la plus faible entre le lien et la zone de texte
@@ -856,7 +1014,7 @@ class TopologyData:
         filtered_text = {}
         for zone_index in extracted_text.keys():
             zoneLinks = [link[0] for link in self.zoneWithLinks.get(zone_index)]
-            device = self.equipments.get(zone_index)
+            device = self.equipments.get(zone_index, 'unknown')
             filtered_text[zone_index] = {
                 'device': device,
                 'hostname': None,
@@ -875,8 +1033,8 @@ class TopologyData:
                     case 'interface':
                         closest_link, _ = self.closest_to_the_box(text_entry.get('coordinates'), zoneLinks)
                         filtered_text[zone_index]['interfaces'][closest_link] = text
-                    case 'ip_address':
-                        if device != 'pc':
+                    case 'ip':
+                        if device != 'pc' or device != 'server':
                             closest_link, _ = self.closest_to_the_box(text_entry.get('coordinates'), zoneLinks)
                             filtered_text[zone_index]['ip_addresses'][closest_link] = text
                         else:
@@ -885,6 +1043,57 @@ class TopologyData:
                         continue  # unknown class
             
         self.zoneLinkText = filtered_text
+
+        cprint("Zone link text", 'blue')
+        print(self.zoneLinkText)
+        cprint('-------------------------------------------', 'blue')
+
+    def complete_the_ip_address(self, incomplete_ip, network_id):
+        """
+        Completes an incomplete IP address to a full IP address
+        """
+        # Network address gathering
+        network = ipaddress.IPv4Network(network_id)
+        network_add = network.network_address
+        netmask = network.netmask
+        prefix_len = network.prefixlen
+
+        # Remove CIDR mask from incomplete_ip if present
+        if '/' in incomplete_ip:
+            incomplete_ip = incomplete_ip.split('/')[0]
+
+        incomplete_ip_list = incomplete_ip.split('.')
+        incomplete_ip_list = [el for el in incomplete_ip_list if el != ' ' or el != '']
+
+        # Determine the host part
+        network_add_list = str(network_add).split('.')
+        netmask_list = str(netmask).split('.')
+        
+        for i, mask in enumerate(netmask_list):
+            if mask != '255':
+                step = 256 - int(mask) # Determine possible host values range
+                match i:
+                    # Return complete address
+                    case 0:
+                        return None
+                    case 1:
+                        if not incomplete_ip_list[-3]: return None
+                        elif int(incomplete_ip_list[-3]) not in range(int(network_add_list[1]) + 1, step - 1):
+                            return None
+                        else:
+                            return f"{network_add_list[0]}.{incomplete_ip_list[-3]}.{incomplete_ip_list[-2]}.{incomplete_ip_list[-1]}/{str(prefix_len)}"
+                    case 2:
+                        if not incomplete_ip_list[-2]: return None
+                        elif int(incomplete_ip_list[-2]) not in range(int(network_add_list[2]) + 1, step - 1):
+                            return None
+                        else:
+                            return f"{network_add_list[0]}.{network_add_list[1]}.{incomplete_ip_list[-2]}.{incomplete_ip_list[-1]}/{str(prefix_len)}"
+                    case 3:
+                        if not incomplete_ip_list[-1]: return None
+                        elif int(incomplete_ip_list[-1]) not in range(int(network_add_list[3]) + 1, step - 1):
+                            return None
+                        else:
+                            return f"{network_add_list[0]}.{network_add_list[1]}.{network_add_list[2]}.{incomplete_ip_list[-1]}/{str(prefix_len)}"
 
     def is_data_extracted(self, currentProjectPath):
         privateDB = pathlib.Path(currentProjectPath)/"privateDB.db"
@@ -925,6 +1134,8 @@ class TopologyData:
             hostname_val = links_info.get('hostname')
             if not hostname_val:
                 # Fallback if hostname is missing
+                if not links_info.get('device'):
+                    continue
                 device_type = links_info.get('device') or equipments.get(zone_id, "device")
                 hostname_val = f'{device_type}_{zone_id}'
             
@@ -1000,21 +1211,20 @@ class TopologyData:
                         }
 
                 case 'pc':
-                    host_data = {
-                        "ansible_connection": "network_cli",
-                        "ansible_user": "<USERNAME>",
-                        "ansible_network_os": "ios",
-                        "hostname": clean_hostname,
-                        "device_type": links_info.get('device'),
-                    }
                     # PC often has just one IP
                     ip_val = links_info.get('ip_address')
+                    iface_name = links_info.get('interface')
                     if not ip_val and 'ip_addresses' in links_info:
                          if links_info['ip_addresses']:
                              ip_val = list(links_info['ip_addresses'].values())[0]
                     
                     if ip_val:
-                        host_data['ip'] = ip_val
+                        if iface_name:
+                            host_data['interfaces'][iface_name]['ip'] = ip_val
+                        else:
+                            host_data['interfaces']['eth0'] = {
+                                'ip': ip_val
+                            }
     
             all_group["nodes"][clean_hostname] = host_data
             data = all_group
