@@ -39,6 +39,9 @@ class TopologyData:
         self.emit_status("Importing image...")
         self.import_the_image(imagePath, currentProjectPath)
 
+        self.emit_status("Running Zones Detection...")
+        self.zones_detection("zones_detection_x.pt")
+
         self.emit_status("Running Object Detection...")
         self.object_detection("best.pt")
 
@@ -131,6 +134,77 @@ class TopologyData:
         # TODO: Remove the print()
         cprint("Equipments zones detection done", 'green')
 
+    def zones_detection(self, model: str):
+        """Zones detection
+
+        It uses YOLO, and the model zones_detection_x.pt, to detect:
+        - zones of equipments as the class 'equipment_zone'
+        - zones of links text as the class 'linktext_zone'
+        - zones of other text as the class 'extratext_zone'
+        
+        The result is stored in the following dictionnaries:
+        - detected_equipments_zones
+        - detected_linktext_zones
+        - detected_extratext_zones
+        """
+
+        # Chargement de l'image
+        imagePath = self.imagePath
+        image = cv2.imread(imagePath)
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+
+        mask = self.create_masks(image=binary)
+        invertedMask = cv2.bitwise_not(mask) # Inversion du masque
+
+        # Application du masque
+        maskedImage = cv2.bitwise_and(binary, binary, mask=invertedMask)
+        if len(maskedImage.shape) == 2:
+            maskedImage = cv2.cvtColor(maskedImage, cv2.COLOR_GRAY2BGR)
+
+        # Chargement du model
+        modelPath = self.AI_model_path(model)
+        model = YOLO(modelPath)
+
+        # Detection des equipements
+        results = model.track(maskedImage)
+
+        # Recuperation de la localisation des zones detectees et des indexes
+        self.detected_equipments_zones = {}
+        self.detected_linktext_zones = {}
+        self.detected_extratext_zones = {}
+        for result in results:
+            for box in result.boxes:
+                match box.cls[0]:
+                    case 0:
+                        # Class: 'equipment_zone'
+                        id = int(box.id[0].item())
+                        self.detected_equipments_zones[id] = self.extract_zones_coordinates(box)
+                    case 1:
+                        # Class: 'linktext_zone'
+                        id = int(box.id[0].item())
+                        self.detected_linktext_zones[id] = self.extract_zones_coordinates(box)
+                    case 2:
+                        # Class: 'extratext_zone'
+                        id = int(box.id[0].item())
+                        self.detected_extratext_zones[id] = self.extract_zones_coordinates(box)
+                    case _:
+                        continue
+                
+        # TODO: Remove the print()
+        cprint("Equipments zones detection done", 'green')
+    
+    def extract_zones_coordinates(self, box):
+
+        # Extract the coordinates of the box
+        x1, y1, x2, y2 = box.xyxy[0]
+        x1, x2, y1, y2 = int(x1.item()), int(x2.item()), int(y1.item()), int(y2.item())
+
+        x, y, w, h = box.xywh[0]
+        x, y, w, h = int(x.item()), int(y.item()), int(w.item()), int(h.item())
+
+        return {'points':((x1, y1), (x2, y2)), 'box': (x, y, w, h)}
+
     def detect_other_text(self, modelName: str):
         """Detection des zones de texte en dehors du texte pres des equipements"""
 
@@ -173,6 +247,8 @@ class TopologyData:
                         points = ((x1, y1), (x2, y1), (x2, y2), (x1, y2))
                         self.detectedTextZones[id] = {'points': points, 'box': (x, y, w, h)}
 
+        cprint('Links text detection', 'green')
+        print(self.detectedTextZones)
         cprint("Detection de texte terminee", 'green')
 
         return self.detectedTextZones
@@ -180,7 +256,7 @@ class TopologyData:
     def equipment_detection(self, modelName:str):
         """Detection des equipements dans les zones detectees"""
 
-        zones = self.detectedZones # Detected zones
+        zones = self.detected_equipments_zones # Detected zones
         imagePath = self.imagePath  # Image path
         image = cv2.imread(imagePath)   # Reading the image with cv2
 
@@ -216,7 +292,7 @@ class TopologyData:
     def create_masks(self, image):
         """Creation des masques pour les zones detectees"""
 
-        detectedZones = self.detectedZones
+        detectedZones = self.detected_equipments_zones
 
         # Masquage des zones avec equipements avant le debut de la detection des lignes (Liens)
         # Creation d'un masque
@@ -287,7 +363,7 @@ class TopologyData:
             minDistance = float('inf')
             closestZoneId = None
 
-            for zoneId, zoneData in self.detectedTextZones.items():
+            for zoneId, zoneData in self.detected_linktext_zones.items():
                 zonePolygon = Polygon(zoneData['points'])
                 
                 # Skip invalid polygons
@@ -652,8 +728,8 @@ class TopologyData:
                 print(f'{text} : ip\n')
                 result.append((index, 'ip'))
             elif self.is_uncomplete_ip(text):
-                print(f'{text} : uncomplete ip')
-                result.append((index, 'uncomplete_ip'))
+                print(f'{text} : incomplete ip')
+                result.append((index, 'incomplete_ip'))
             elif self.is_interface(text):
                 print(f'{text} : interface\n')
                 result.append((index, 'interface'))
@@ -667,7 +743,7 @@ class TopologyData:
         self.links
         linkedEquipments = self.linkedEquipments
         texts = self.extractedTextForEquipmentZones
-        equipmentZone = self.detectedZones
+        equipmentZone = self.detected_equipments_zones
         
         # Liste des liens qui aboutissent a une zone
         zoneWithLinks = {}
@@ -715,7 +791,7 @@ class TopologyData:
         """Lie les equipements a l'aide des liens qui ont ete detectes"""
 
         detectedLinks = self.links
-        detectedZones = self.detectedZones
+        detectedZones = self.detected_equipments_zones
 
         zoneWithLinks = {}
         for index in detectedZones:
@@ -812,9 +888,7 @@ class TopologyData:
 
         # OCR on each detected zone
         # Or Targeted OCR
-        self.extractedTextForEquipmentZones = self.targeted_OCR(image, self.detectedZones, "equipement")
-        # cprint('OCR on equipment text', 'yellow')
-        # print(self.extractedTextForEquipmentZones)
+        self.extractedTextForEquipmentZones = self.targeted_OCR(image, self.detected_equipments_zones, "equipement")
 
     def OCR_on_detected_text_zones(self):
         """OCR on detected zones of text"""
@@ -823,7 +897,7 @@ class TopologyData:
         self.detect_other_text("best.pt")
 
         imagePath = self.imagePath
-        detectedTextZones = self.detectedTextZones
+        detectedTextZones = self.detected_linktext_zones
 
         image = cv2.imread(imagePath)
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -834,12 +908,17 @@ class TopologyData:
         # OCR on each detected zone
         # Or Targeted OCR
         extractedTextForLinks = self.targeted_OCR(image, detectedTextZones, "links")
+        
+        # Link texts to related links
+        self.textOnLinks = self.link_text_to_links(extractedTextForLinks)
 
-        self.link_text_to_links(extractedTextForLinks)
+        # Print the extracted links data
+        cprint("Links data", 'blue')
+        print(self.textOnLinks)
+        cprint("-----------------------------------")
 
     def targeted_OCR(self, image, zones, type):
-        """Realise un OCR cible sur les differentes zones detectees
-        Retourne: {zone_index: {ocr_index: {'text': str, 'coordinates': (x,y,w,h), 'class': None}, ...}, ...}
+        """Use OCR on detected zones to extract the text in it
         """
         extractedText = {}
         for index in zones:
@@ -861,26 +940,6 @@ class TopologyData:
 
         # Flatten texts for classification
         texts = [cell['text'] for sub in extractedText.values() for cell in sub.values()]
-
-        # if texts:
-        #     classes = self.text_classification(texts)  # pass list of texts
-        #     # classes should be a list of dicts like [{'label':..., 'score':...}, ...]
-        #     count = 0
-        #     for subdict in extractedText.values():
-        #         for data in subdict.values():
-        #             try:
-        #                 data['class'] = classes[count]['label']
-        #                 data['score'] = classes[count]['score']
-        #             except Exception:
-        #                 data['class'] = None
-        #             count += 1
-
-        # #TODO: Remove the print()
-        # cprint("Extracted Text in targeted OCR", 'red')
-        # print(extractedText)
-        # cprint("------------------------------\n", 'red')
-
-        #@#@# Second Idea
 
         def classify():
             length = len(texts)
@@ -932,7 +991,6 @@ class TopologyData:
         
         if texts:
             extracted_and_classified_text = classify()
-            print(extracted_and_classified_text)
             return extracted_and_classified_text
         else:
             return None
@@ -946,7 +1004,7 @@ class TopologyData:
         En sortie il renvoie les coordonnees du point le plus proche du lien et la distance entre ce point et le lien.
         """
 
-        textZones = self.detectedTextZones
+        textZones = self.detected_linktext_zones
         zoneDistancePair = []
         for index in textZones:
             regionPoints = textZones[index]['points']
@@ -1001,7 +1059,7 @@ class TopologyData:
 
             textOnLinks[link] = {'zone': closestTextZone, 'text': joined, 'class': label}
 
-        self.textOnLinks = textOnLinks
+        return textOnLinks
     
     def text_treatment(self):
         """We have:  
@@ -1010,6 +1068,7 @@ class TopologyData:
         - the zones links
         """
         extracted_text = self.extractedTextForEquipmentZones
+        links_text = self.textOnLinks
         
         filtered_text = {}
         for zone_index in extracted_text.keys():
@@ -1039,14 +1098,28 @@ class TopologyData:
                             filtered_text[zone_index]['ip_addresses'][closest_link] = text
                         else:
                             filtered_text[zone_index]['ip_address'] = text
+                    case 'incomplete_ip':
+                        closest_link, _ = self.closest_to_the_box(text_entry.get('coordinates'), zoneLinks)
+
+                        # Get the ip from the closest link
+                        network_ip = links_text[closest_link]['text'] if links_text[closest_link]['class'] == 'ip' else None
+                        
+                        if network_ip:
+                            # Complete the ip address based on the network_ip
+                            complete_ip = self.complete_the_ip_address(text, network_ip)
+
+                            print(f'{text} : {complete_ip}')
+                        else:
+                            complete_ip = text
+
+                        if device != 'pc' or device != 'server':
+                            filtered_text[zone_index]['ip_addresses'][closest_link] = complete_ip
+                        else:
+                            filtered_text[zone_index]['ip_address'] = complete_ip
                     case _:
                         continue  # unknown class
             
         self.zoneLinkText = filtered_text
-
-        cprint("Zone link text", 'blue')
-        print(self.zoneLinkText)
-        cprint('-------------------------------------------', 'blue')
 
     def complete_the_ip_address(self, incomplete_ip, network_id):
         """
@@ -1242,7 +1315,6 @@ class TopologyData:
         group_vars_dir.mkdir(parents=True, exist_ok=True)
         host_vars_dir.mkdir(parents=True, exist_ok=True)
 
-        print(data)
         data = data['nodes']
 
         for hostname, host_data in data.items():

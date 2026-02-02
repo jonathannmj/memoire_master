@@ -408,12 +408,12 @@ class AfterExtraction(QWidget, Ui_AfterExtraction):
                     column_created = True
 
                 i_data = [value for value in if_data.values()]
-                print(i_data)
+                # print(i_data)
                 i_data.insert(0, if_name)
                 row_data.append(i_data) # Store every interface with the data to be printed for it
                 link_mapping.append(if_name) # Store the key used in dict
 
-            print(row_data)
+            # print(row_data)
 
             # Create Table
             table = QTableWidget()
@@ -428,7 +428,7 @@ class AfterExtraction(QWidget, Ui_AfterExtraction):
             table.setRowCount(len(row_data))
             
             for row_idx, row_text in enumerate(row_data):
-                print(list(row_text))
+                # print(list(row_text))
                 # Interface
                 # item_if = QTableWidgetItem(str(if_txt))
                 # # Store original interface key to identify it during save
@@ -658,8 +658,6 @@ class Worker(QObject):
              self.message.emit(msg)
         
         self.appData.data = TopologyData().process(self.imagePath, self.currentProjectPath, status_callback=callback)
-        cprint("Extracted data", 'red')
-        print(self.appData.data)
         self.appData.extracted = True
         self.finished.emit()
 
