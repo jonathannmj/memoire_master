@@ -1,17 +1,15 @@
-l1 = ["math", "English", "Informatics", "Chemistry"]
-l2 = ["today", "tomorow"]
-print(type(l2))
-l2p = ["yesterday"] + l2
-l2.insert(1, "yesterday")
-l3 = ["monday", "tuesday"]
+from itertools import islice
 
-liste = []
+dic = {
+    1 :{"name": "jonathan", 'aka': "the flash"},
+    2: {'name': "hermes", 'aka': "savitar"},
+    3 :{"name": "jonathan", 'aka': "the flash"}, 
+    4: {'name': "hermes", 'aka': "savitar"}}
 
-liste.append(l1)
-print(liste)
+len = len(dic)
+step = len // 3
 
-liste.append(l2)
-print(liste)
-
-liste.append(l2p)
-print(liste)
+print(dict(islice(dic.items(), 0, step)))
+print(dict(islice(dic.items(), step, step*2)))
+print(dict(islice(dic.items(), step*2, len)))
+print(len)

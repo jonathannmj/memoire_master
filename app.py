@@ -377,7 +377,6 @@ class AfterExtraction(QWidget, Ui_AfterExtraction):
 
             device_type = node_infos.get("device", "")
 
-            
             # routers / switches
             interfaces = node_infos.get("interfaces", {})
 

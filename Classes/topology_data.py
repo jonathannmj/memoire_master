@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import easyocr
 import pytesseract
+from itertools import islice, chain
 
 import sqlite3
 import re
@@ -42,11 +43,11 @@ class TopologyData:
         self.emit_status("Running Zones Detection...")
         self.zones_detection("zones_detection_x.pt")
 
-        self.emit_status("Running Object Detection...")
-        self.object_detection("best.pt")
+        # self.emit_status("Running Object Detection...")
+        # self.object_detection("best.pt")
 
-        self.emit_status("Detecting Other Text...")
-        self.detect_other_text("best.pt")
+        # self.emit_status("Detecting Other Text...")
+        # self.detect_other_text("best.pt")
 
         self.emit_status("Detecting Links...")
         self.links_detection("links_detection.pt")
@@ -150,24 +151,13 @@ class TopologyData:
 
         # Chargement de l'image
         imagePath = self.imagePath
-        image = cv2.imread(imagePath)
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
-
-        mask = self.create_masks(image=binary)
-        invertedMask = cv2.bitwise_not(mask) # Inversion du masque
-
-        # Application du masque
-        maskedImage = cv2.bitwise_and(binary, binary, mask=invertedMask)
-        if len(maskedImage.shape) == 2:
-            maskedImage = cv2.cvtColor(maskedImage, cv2.COLOR_GRAY2BGR)
 
         # Chargement du model
         modelPath = self.AI_model_path(model)
         model = YOLO(modelPath)
 
         # Detection des equipements
-        results = model.track(maskedImage)
+        results = model.track(imagePath)
 
         # Recuperation de la localisation des zones detectees et des indexes
         self.detected_equipments_zones = {}
@@ -181,13 +171,13 @@ class TopologyData:
                         id = int(box.id[0].item())
                         self.detected_equipments_zones[id] = self.extract_zones_coordinates(box)
                     case 1:
-                        # Class: 'linktext_zone'
-                        id = int(box.id[0].item())
-                        self.detected_linktext_zones[id] = self.extract_zones_coordinates(box)
-                    case 2:
                         # Class: 'extratext_zone'
                         id = int(box.id[0].item())
                         self.detected_extratext_zones[id] = self.extract_zones_coordinates(box)
+                    case 2:
+                        # Class: 'linktext_zone'
+                        id = int(box.id[0].item())
+                        self.detected_linktext_zones[id] = self.extract_zones_coordinates(box)
                     case _:
                         continue
                 
@@ -655,7 +645,7 @@ class TopologyData:
         pattern = r'^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(/(3[0-2]|[12]?[0-9]))?$'
         return bool(re.match(pattern, text))
 
-    def is_uncomplete_ip(self, text):
+    def is_incomplete_ip(self, text):
         """Checks if the text is an incomplete IPv4 address segment."""
         # Matches patterns like .1, .1.1, 1.2, .1/24 etc.
         # Cases:
@@ -709,33 +699,32 @@ class TopologyData:
         except ValueError:
             return False
 
-    def classify_text(self, texts, start, result):
+    def classify_text(self, texts):
         """Classify the text"""
-        for index, text in enumerate(texts, start=start):
-            if self.is_hostname(text):
-                print(f'{text} : hostname\n')
-                result.append((index, 'hostname'))
-            elif self.is_protocol(text):
-                print(f'{text} : protocol\n')
-                result.append((index, 'protocol'))
-            elif self.is_vlan(text):
-                print(f'{text} : vlan\n')
-                result.append((index, 'vlan'))
-            elif self.is_ip(text):
-                print(f'{text} : ip\n')
-                result.append((index, 'ip'))
-            elif self.is_ip_with_mask(text):
-                print(f'{text} : ip\n')
-                result.append((index, 'ip'))
-            elif self.is_uncomplete_ip(text):
-                print(f'{text} : incomplete ip')
-                result.append((index, 'incomplete_ip'))
-            elif self.is_interface(text):
-                print(f'{text} : interface\n')
-                result.append((index, 'interface'))
-            else:
-                print(f'{text} : other\n')
-                result.append((index, 'other'))
+        if isinstance(texts, list):
+            result = []
+            for index, text in enumerate(texts):
+                if self.is_hostname(text): result.append((index, 'hostname'))
+                elif self.is_protocol(text): result.append((index, 'protocol'))
+                elif self.is_vlan(text): result.append((index, 'vlan'))
+                elif self.is_ip(text): result.append((index, 'ip'))
+                elif self.is_ip_with_mask(text): result.append((index, 'ip'))
+                elif self.is_incomplete_ip(text): result.append((index, 'incomplete_ip'))
+                elif self.is_interface(text): result.append((index, 'interface'))
+                else: result.append((index, 'other'))
+            
+            return result
+        
+        else:
+            text = texts
+            if self.is_hostname(text): return "hostname"
+            elif self.is_protocol(text): return "protocol"
+            elif self.is_vlan(text): return "vlan"
+            elif self.is_ip(text): return "ip"
+            elif self.is_ip_with_mask(text): return "ip"
+            elif self.is_incomplete_ip(text): return "incomplete_ip"
+            elif self.is_interface(text): return "interface"
+            else: return "other"
 
     def map_links_to_port_text(self):
         """Lie chaque extremite d'un lien avec le texte qui s'y rapporte"""
@@ -888,7 +877,7 @@ class TopologyData:
 
         # OCR on each detected zone
         # Or Targeted OCR
-        self.extractedTextForEquipmentZones = self.targeted_OCR(image, self.detected_equipments_zones, "equipement")
+        self.extractedTextForEquipmentZones = self.targeted_OCR(image, self.detected_equipments_zones)
 
     def OCR_on_detected_text_zones(self):
         """OCR on detected zones of text"""
@@ -906,8 +895,8 @@ class TopologyData:
         _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
 
         # OCR on each detected zone
-        # Or Targeted OCR
-        extractedTextForLinks = self.targeted_OCR(image, detectedTextZones, "links")
+        # Or Targeted OCR        
+        extractedTextForLinks = self.targeted_OCR(image, detectedTextZones)
         
         # Link texts to related links
         self.textOnLinks = self.link_text_to_links(extractedTextForLinks)
@@ -915,31 +904,59 @@ class TopologyData:
         # Print the extracted links data
         cprint("Links data", 'blue')
         print(self.textOnLinks)
+        # print(detectedTextZones)
         cprint("-----------------------------------")
 
-    def targeted_OCR(self, image, zones, type):
+    def targeted_OCR(self, image, detected_zones):
         """Use OCR on detected zones to extract the text in it
         """
-        extractedText = {}
-        for index in zones:
-            extractedText[index] = {}
-            (x, y, w, h) = zones[index]['box']
-            xOrigin = x - w/2
-            yOrigin = y - h/2
-            regionOfInterest = image[int(yOrigin) : int(y+h), int(xOrigin) : int(x+w)]
+        length = len(detected_zones)
+        step = length // 3
 
-            # Read text from the zone with 'easyocr'
-            reader = easyocr.Reader(['en', 'fr'])
-            ocrResult = reader.readtext(image=regionOfInterest)
+        # Initialize the dictionnaries where will be saved the results
+        result1 = {}
+        result2 = {}
+        result3 = {}
+        
+        def OCR(zones, result):
+            for index in zones:
+                result[index] = {}
+                (x, y, w, h) = zones[index]['box']
+                xOrigin = x - w/2
+                yOrigin = y - h/2
+                regionOfInterest = image[int(yOrigin) : int(y+h), int(xOrigin) : int(x+w)]
 
-            counter = 0
-            for (bbox, text, probability) in ocrResult:
-                if probability >= 0.7:   # Keep only the data with a probability greater or equal to 70%
-                    extractedText[index][counter] = {'text': text, 'coordinates': bbox}
-                    counter += 1
+                # Read text from the zone with 'easyocr'
+                reader = easyocr.Reader(['en', 'fr'])
+                ocrResult = reader.readtext(image=regionOfInterest)
+
+                counter = 0
+                for (bbox, text, probability) in ocrResult:
+                    if probability >= 0.7:   # Keep only the data with a probability greater or equal to 70%
+                        result[index][counter] = {'text': text, 'coordinates': bbox}
+                        counter += 1
+
+        # Create a thread to do the classification on each part of the list
+        thread_1 = threading.Thread(target=OCR, args=(dict(islice(detected_zones.items(), 0, step)), result1,))
+        thread_2 = threading.Thread(target=OCR, args=(dict(islice(detected_zones.items(), step, step*2)), result2,))
+        thread_3 = threading.Thread(target=OCR, args=(dict(islice(detected_zones.items(), step*2, length)), result3,))
+
+        # Start the threads
+        thread_1.start()
+        thread_2.start()
+        thread_3.start()
+        
+        # Wait for all the threads to finish their work before continuing
+        thread_1.join()
+        thread_2.join()
+        thread_3.join()
+
+        extractedText = dict(chain(result1.items(), result2.items(), result3.items()))
 
         # Flatten texts for classification
         texts = [cell['text'] for sub in extractedText.values() for cell in sub.values()]
+
+        results = self.classify_text(texts)
 
         def classify():
             length = len(texts)
@@ -952,10 +969,10 @@ class TopologyData:
             result4 = []
 
             # Create a thread to do the classification on each part of the list
-            thread_1 = threading.Thread(target=self.classify_text, args=(texts[0:step], 0, result1,))
-            thread_2 = threading.Thread(target=self.classify_text, args=(texts[step:step*2], step, result2,))
-            thread_3 = threading.Thread(target=self.classify_text, args=(texts[step*2:step*3], step*2, result3,))
-            thread_4 = threading.Thread(target=self.classify_text, args=(texts[step*3:length], step*3, result4,))
+            thread_1 = threading.Thread(target=self.classify_text, args=(texts[0:step], result1, 0,))
+            thread_2 = threading.Thread(target=self.classify_text, args=(texts[step:step*2], result2, step,))
+            thread_3 = threading.Thread(target=self.classify_text, args=(texts[step*2:step*3], result3, step*2,))
+            thread_4 = threading.Thread(target=self.classify_text, args=(texts[step*3:length], result4, step*3,))
             
             # Start the threads
             thread_1.start()
@@ -976,16 +993,15 @@ class TopologyData:
             print(result4)
             cprint("____________________________\n")
             
-            results = result1 + result2 + result3 + result4
-            index = 0
-            for subdict in extractedText.values():
-                    for data in subdict.values():
-                        if 'fo/0' in data['text']:
-                            data['text'] = 'f0/0'
-                            data['class'] = results[index][1]
-                        else:
-                            data['class'] = results[index][1]
-                        index += 1
+        index = 0
+        for subdict in extractedText.values():
+            for data in subdict.values():
+                if 'fo/0' in data['text']:
+                    data['text'] = 'f0/0'
+                    data['class'] = results[index][1]
+                else:
+                    data['class'] = results[index][1]
+                index += 1
             
             return extractedText
         
@@ -1007,10 +1023,21 @@ class TopologyData:
         textZones = self.detected_linktext_zones
         zoneDistancePair = []
         for index in textZones:
-            regionPoints = textZones[index]['points']
+            (x, y, w, h) = textZones[index]['box']
+            xOrigin = x - w/2
+            yOrigin = y - h/2
+
+            x1 = xOrigin
+            y1 = yOrigin
+            x2 = x1
+            y2 = y1 + h
+            x3 = x1 + w
+            y3 = y2
+            x4 = x3
+            y4 = y1
 
             # Definition du rectangle de la zone de texte
-            rectangle = Polygon(regionPoints)
+            rectangle = Polygon(((x1, y1), (x2, y2), (x3, y3), (x4, y4)))
 
             # Ligne representant le lien
             linkLine = LineString(link)
@@ -1041,7 +1068,6 @@ class TopologyData:
         textOnLinks = {}
         for link in links.keys():
             closestTextZone, _ = self.closest_to_the_link(links[link]['points'])
-            label = None
             joined = None
             if closestTextZone is not None and closestTextZone in text:
                 zone_entries = text[closestTextZone]
@@ -1049,15 +1075,11 @@ class TopologyData:
                 pieces = [d.get('text', '').strip() for d in zone_entries.values() if d.get('text', '').strip()]
                 if pieces:
                     joined = " ".join(pieces)
-                    try:
-                        # classify the joined text
-                        cls_res = self.text_classification(joined)
-                        if isinstance(cls_res, list) and cls_res:
-                            label = cls_res[0].get('label')
-                    except Exception:
-                        label = None
 
-            textOnLinks[link] = {'zone': closestTextZone, 'text': joined, 'class': label}
+                    # classify the joined text
+                    cls = self.classify_text(joined)
+
+            textOnLinks[link] = {'zone': closestTextZone, 'text': joined, 'class': cls}
 
         return textOnLinks
     
@@ -1126,7 +1148,11 @@ class TopologyData:
         Completes an incomplete IP address to a full IP address
         """
         # Network address gathering
-        network = ipaddress.IPv4Network(network_id)
+        try:
+            network = ipaddress.IPv4Network(network_id)
+        except e:
+            print(f"Error while trying to complete the ip address.\nError: {e}")
+
         network_add = network.network_address
         netmask = network.netmask
         prefix_len = network.prefixlen
