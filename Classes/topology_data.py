@@ -43,12 +43,6 @@ class TopologyData:
         self.emit_status("Running Zones Detection...")
         self.zones_detection("zones_detection_x.pt")
 
-        # self.emit_status("Running Object Detection...")
-        # self.object_detection("best.pt")
-
-        # self.emit_status("Detecting Other Text...")
-        # self.detect_other_text("best.pt")
-
         self.emit_status("Detecting Links...")
         self.links_detection("links_detection.pt")
 
@@ -121,35 +115,6 @@ class TopologyData:
         modelsDirectory = pathlib.Path(".") / "AI_models"
         modelPath = pathlib.Path(modelsDirectory) / model
         return modelPath
-
-    def object_detection(self, model: str):
-        # Path to the image
-        imagePath = self.imagePath
-
-        # Chargement du model
-        modelPath = self.AI_model_path(model)
-        model = YOLO(modelPath)
-
-        # Detection des equipements
-        results = model.track(imagePath)
-
-        # Recuperation de la localisation des zones detectees et des indexes
-        self.detectedZones = {}
-        for result in results:
-            for box in result.boxes:
-                if box.cls[0] == 0:
-                    x1, y1, x2, y2 = box.xyxy[0]
-                    x1, x2, y1, y2 = int(x1.item()), int(x2.item()), int(y1.item()), int(y2.item())
-
-                    x, y, w, h = box.xywh[0]
-                    x, y, w, h = int(x.item()), int(y.item()), int(w.item()), int(h.item())
-
-                    id = int(box.id[0].item())
-
-                    self.detectedZones[id] = {'points':((x1, y1), (x2, y2)), 'box': (x, y, w, h)}
-
-        # TODO: Remove the print()
-        cprint("Equipments zones detection done", 'green')
 
     def zones_detection(self, model: str):
         """Zones detection

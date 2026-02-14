@@ -4,7 +4,7 @@ from PySide6.QtCore import QTime, QUrl, Qt, QThread, Signal, QObject
 from PySide6.QtGui import QPixmap, QColor
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QDialog, QMessageBox, QStackedWidget,
     QGridLayout, QFileDialog, QVBoxLayout, QPushButton, QGroupBox, QLabel, QLineEdit, QFormLayout, QHBoxLayout, 
-    QSizePolicy, QTableWidget, QTableWidgetItem, QHeaderView, QTextBrowser)
+    QSizePolicy, QTableWidget, QTableWidgetItem, QHeaderView, QTextBrowser, QScrollArea)
 
 from UI.main_window.main_window_ui import Ui_MainWindow
 from UI.open_project.open_project_ui import Ui_OpenProject
@@ -322,8 +322,44 @@ class AfterExtraction(QWidget, Ui_AfterExtraction):
         self.refresh_data()
         super().showEvent(event)
 
+    def resizeEvent(self, event):
+        """Handle window resize to show/hide image."""
+        if self.width() > 1200:
+            if hasattr(self, 'image_scroll_area'):
+                self.image_scroll_area.show()
+        else:
+            if hasattr(self, 'image_scroll_area'):
+                self.image_scroll_area.hide()
+        super().resizeEvent(event)
+
     def refresh_data(self):
         self.show_extracted_data()
+        self.show_image()
+
+    def show_image(self):
+        """Display the source image if available."""
+        if self.appData.imagePath and os.path.exists(self.appData.imagePath):
+            pixmap = QPixmap(self.appData.imagePath)
+            if not pixmap.isNull():
+                if not hasattr(self, 'image_label'):
+                     # Create image viewer if not exists
+                    self.image_label = QLabel()
+                    self.image_label.setAlignment(Qt.AlignCenter)
+                    self.image_scroll_area = QScrollArea()
+                    self.image_scroll_area.setWidget(self.image_label)
+                    self.image_scroll_area.setWidgetResizable(True)
+                    # Add to layout to the right of the existing groupbox
+                    # gridLayout_3 contains the main layout of AfterExtraction
+                    # internal structure: widget(0,0->Title), groupBox(1,0->Data)
+                    self.gridLayout_3.addWidget(self.image_scroll_area, 1, 1)
+                
+                self.image_label.setPixmap(pixmap)
+                
+                # Check visibility based on current size
+                if self.width() > 1200:
+                    self.image_scroll_area.show()
+                else:
+                    self.image_scroll_area.hide()
 
     def _clear_layout(self, layout):
         while layout.count():
