@@ -174,55 +174,7 @@ class TopologyData:
         x, y, w, h = box.xywh[0]
         x, y, w, h = int(x.item()), int(y.item()), int(w.item()), int(h.item())
 
-        return {'points':((x1, y1), (x2, y2)), 'box': (x, y, w, h)}
-
-    def detect_other_text(self, modelName: str):
-        """Detection des zones de texte en dehors du texte pres des equipements"""
-
-        # Chargement de l'image
-        imagePath = self.imagePath
-        image = cv2.imread(imagePath)
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
-
-        mask = self.create_masks(image=binary)
-        invertedMask = cv2.bitwise_not(mask) # Inversion du masque
-
-        # Application du masque
-        maskedImage = cv2.bitwise_and(binary, binary, mask=invertedMask)
-        if len(maskedImage.shape) == 2:
-            maskedImage = cv2.cvtColor(maskedImage, cv2.COLOR_GRAY2BGR)
-
-        # Chargement du model
-        modelPath = self.AI_model_path(modelName)
-        model = YOLO(modelPath)
-
-        # Detection des equipements
-        results = model.track(maskedImage)
-
-        # Recuperation de la localisation des zones detectees et des indexes
-        self.detectedTextZones = {}
-        for result in results:
-            for box in result.boxes:
-                if len(box.cls) > 0 and box.cls[0] == 0:
-                    if len(box.xyxy) > 0 and len(box.xywh) > 0 and len(box.id) > 0:
-                        x1, y1, x2, y2 = box.xyxy[0]
-                        x1, y1, x2, y2 = int(x1.item()), int(y1.item()), int(x2.item()), int(y2.item())
-
-                        x, y, w, h = box.xywh[0]
-                        x, y, w, h = int(x.item()), int(y.item()), int(w.item()), int(h.item())
-
-                        id = box.id[0].item()
-
-                        # Create 4 corner points for the bounding box to form a proper polygon
-                        points = ((x1, y1), (x2, y1), (x2, y2), (x1, y2))
-                        self.detectedTextZones[id] = {'points': points, 'box': (x, y, w, h)}
-
-        cprint('Links text detection', 'green')
-        print(self.detectedTextZones)
-        cprint("Detection de texte terminee", 'green')
-
-        return self.detectedTextZones
+        return {'points':((x1, y1), (x2, y2)), 'box': (x, y, w, h)}   
     
     def equipment_detection(self, modelName:str):
         """Detection des equipements dans les zones detectees"""
@@ -887,9 +839,6 @@ class TopologyData:
 
     def OCR_on_detected_link_text_zones(self):
         """OCR on detected zones of text"""
-
-        # Detection des zones de texte
-        self.detect_other_text("best.pt")
 
         imagePath = self.imagePath
         detectedTextZones = self.detected_linktext_zones
