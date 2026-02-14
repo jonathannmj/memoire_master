@@ -47,7 +47,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         # selectedPath, self.projectTitle = self.open_a_project()
         # self.currentProjectPath = Project().create_project(self.projectTitle, selectedPath)
 
-        self.project_open_page.appInfosFilled.connect(self.create_new_project)
+        self.project_open_page.appInfosFilled.connect(self.on_project_created)
 
         # Page d'importation de l'image dans un projet
         # self.image_import_page_in_a_project = ImageImport(self, currentProjectPath=self.currentProjectPath, appData=self.appData)
@@ -56,21 +56,32 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         # self.stacked.setCurrentWidget(self.image_import_page_in_a_project)
 
         # Actions from the File menu
-        self.actionNew.triggered.connect(self.create_new_project)
-        self.actionOpen.triggered.connect(self.open_a_project)
+        self.actionNew.triggered.connect(self.trigger_new_project)
+        self.actionOpen.triggered.connect(self.trigger_open_project)
         self.actionFermer.triggered.connect(self.close)
         self.actionSave.triggered.connect(self.save)
         self.actionSave_As.triggered.connect(self.save_as)
 
-    def create_new_project(self):
+    def trigger_new_project(self):
+        """Called when 'New' is clicked."""
+        self.stacked.setCurrentWidget(self.project_open_page)
+
+    def on_project_created(self):
+        """Called when a new project is created via the form."""
         # Affichage de la page de selection/creation d'un projet
         self.currentProjectPath = str(self.appData.selectedDirectory)
         print(self.currentProjectPath)
         self.projectTitle = str(self.appData.projectTitle)
         print(self.projectTitle)
         self.appData.currentProjectPath = self.currentProjectPath
+        
+        # Reset data for new project
+        self.appData.data = None
+        self.appData.extracted = False
 
         self.import_image()
+
+    
     
     def import_image(self):
         self.image_import_page_in_a_project = ImageImport(self, currentProjectPath=self.currentProjectPath, appData=self.appData)
@@ -79,28 +90,53 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         self.image_import_page_in_a_project.imageUploaded.connect(self.data_extraction)
 
-    def open_a_project(self):
-        dialog = OpenProject(self)
-        dialog.exec()  # Show the dialog to select a project
-        
-        project_path = dialog.projectDestinationCombo.currentText()
-        projectName = dialog.projectTitleField.text()
+    def trigger_open_project(self):
+        """Called when 'Open' is clicked."""
+        filePath, _ = QFileDialog.getOpenFileName(self, "Ouvrir un projet", "", "Projet Network (*.nmjnwa)")
+        if not filePath:
+            return
+        self.load_project_from_file(filePath)
 
-        return project_path, projectName
+    def load_project_from_file(self, filePath):
+        try:
+            # Properly unpack 4 values from Project.load_project
+            # Note: Project().load_project returns (projectFolder, imageFile, dbFile, configsPath)
+            projectFolder, imageFile, dbFile, configsPath = Project().load_project(filePath)
+            
+            print(f"Loaded: {projectFolder}")
+
+            self.currentProjectPath = projectFolder
+            self.loadedProjectFile = filePath # Remember source zip
+
+            # Update AppData
+            self.appData.currentProjectPath = projectFolder
+            self.appData.imagePath = imageFile 
+            
+            # Attempt to load data
+            data = TopologyData().load_data_from_yaml(projectFolder)
+            
+            if data:
+                self.appData.data = data
+                self.appData.extracted = True
+                print("Data loaded from YAML.")
+                
+                # Show AfterExtraction page
+                self.stacked.setCurrentWidget(self.after_extraction_page)
+                self.after_extraction_page.refresh_data()
+            else:
+                 print("No YAML data found. Showing extraction page (empty).")
+                 self.appData.data = None 
+                 self.appData.extracted = False
+                 # If we have an image but no data, we are in state to run extraction.
+                 # Go to AfterExtraction (it handles empty state) or potentially trigger extraction?
+                 # Using AfterExtraction page is safer.
+                 self.stacked.setCurrentWidget(self.after_extraction_page)
+                 self.after_extraction_page.refresh_data()
         
-    def open_existing_project(self, projectFile):
-        """Ouverture d'un projet existant"""
-        self.loadedProjectFile = projectFile
-        self.old_project_configs = ConfigsContentPage(self, projectFile=projectFile)
-        
-        # We need to grab the extracted folder path from the OldProjectConfigs or Project loader
-        # But OldProjectConfigs manages it internally. Ideally, we should lift this state up.
-        # For now, let's access it from the child or change how it's called.
-        self.currentProjectPath = self.old_project_configs.projectFolder
-        self.appData.currentProjectPath = self.currentProjectPath
-        self.projectName = os.path.splitext(os.path.basename(projectFile))[0]
-        
-        self.stacked.setCurrentWidget(self.old_project_configs)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "Erreur", f"Impossible d'ouvrir le projet: {e}")
 
     def data_extraction(self):
         # The progress bar
@@ -126,88 +162,40 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     def save(self):
         """
-        Sauvegarde le projet en cours.
-        - Si c'est un nouveau projet (dossier), on sauvegarde les donnees YAML.
-        - Si c'est un projet ouvert (zip), on met a jour le zip.
+        Sauvegarde le projet en cours (Ecriture sur le disque).
         """
-        if not self.currentProjectPath:
+        if not self.appData.currentProjectPath:
             return
 
-        print(f"Saving project at {self.currentProjectPath}...")
+        print(f"Saving project at {self.appData.currentProjectPath}...")
         
-        # 1. Save YAML Data (Persist changes to disk)
+        # Save YAML Data
         if self.appData.data:
             try:
-                TopologyData().save_data_to_yaml(self.appData.data, self.currentProjectPath)
+                TopologyData().save_data_to_yaml(self.appData.data, self.appData.currentProjectPath)
+                QMessageBox.information(self, "Succès", "Données sauvegardées sur le disque.")
             except Exception as e:
                 print(f"Error saving YAML data: {e}")
                 QMessageBox.warning(self, "Attention", f"Erreur lors de la sauvegarde des données: {e}")
-
-        # 2. If it is a loaded project (from a .nmjnwa file), update the bundle
-        if hasattr(self, 'loadedProjectFile') and self.loadedProjectFile:
-             # We overwrite the original zip with the current content of the extracted folder
-             # Note: project_bundle creates a NEW zip at target. 
-             # We should probably save to a temp and move, or just direct overwrite if supported.
-             # Project().create_project_bundle takes (path, name). 
-             # usage: create_project_bundle(folder, destination_name_without_ext? or path?)
-             
-             # The current create_project_bundle logic logic builds path / name.nmjnwa
-             # It's a bit rigid. Let's see software.py.
-             # It does: zipPath = pathlib.Path(projectPath) / f"{projectName}.nmjnwa"
-             # This puts the zip INSIDE the project folder usually? No, projectPath is the source folder?
-             # If projectPath is the extracted folder, creating the zip inside it is problematic (recursion).
-             
-             # We want to update self.loadedProjectFile.
-             try:
-                # We need a robust way to package the folder back to self.loadedProjectFile
-                # For now, let's just re-bundle to the original location.
-                
-                # Careful: create_project_bundle takes `projectName`.
-                # If we pass the full path as projectName, it might mess up.
-                # Let's assume we want to save changes to the current folder mostly.
-                # If the user explicitly wants to update the 'zip', we need that logic.
-                
-                # Current simple 'Typical Save' for this app context:
-                # Just ensure data is safe on disk (done above via save_data_to_yaml).
-                # The user can then "Save As" (Export) if they want a new bundle.
-                # BUT, if they opened a ZIP, they expect that ZIP to be updated on close?
-                # The current workflow extracts ZIP to a temp/project folder. 
-                # If we don't repackage, changes are lost when temp is deleted (or just persist in that folder).
-                
-                pass # For now, we rely on disk persistence in the extracted folder.
-                     # Updates to the ZIP are complex without a dedicated method in Project.
-                     # We will leave "Save" as "Persist to Disk" and "Save As" as "Export Bundle".
-                     # However, to meet "Typical Save" expectation for ZIPs, we might need to repackage.
-                     
-                # Let's stick to saving data to disk first to fix the crash.
-             except Exception as e:
-                 pass
-
-        QMessageBox.information(self, "Succès", "Sauvegarde effectuée.")
+        else:
+             QMessageBox.information(self, "Info", "Aucune donnée topologique à sauvegarder.")
 
     def save_as(self):
+        """Exporte le projet en cours vers un fichier .nmjnwa"""
+        if not self.appData.currentProjectPath:
+            QMessageBox.warning(self, "Attention", "Aucun projet n'est ouvert.")
+            return
+
         filePath, _ = QFileDialog.getSaveFileName(self, "Enregistrer sous", "", "Projet Network (*.nmjnwa)")
         
         if not filePath:
             return
 
-        # Prepare arguments for create_project_bundle
-        # It expects (projectPath, projectName).
-        # And it does `zipPath = pathlib.Path(projectPath) / f"{projectName}.nmjnwa"`
-        # This implementation in software.py is slightly limiting if we want to save anywhere.
-        # We might need to adjust software.py OR handle the path manipulation here.
-        
-        # Workaround sticking to current software.py signature if possible, or better:
-        # We fix the call to match what we need.
-        
-        # Actually software.py's create_project_bundle seems to force creation inside projectPath?
-        # Let's check software.py line 66: zipPath = pathlib.Path(projectPath) / projectName
-        # So it creates the zip IN THE SOURCE FOLDER. This is not a true "Save As" to arbitrary location.
-        # We should fix software.py to allow arbitrary destination.
-        
-        # for now, assuming we will fix software.py to accept full destination path.
-        Project().create_project_bundle(self.currentProjectPath, filePath)
-        QMessageBox.information(self, "Succès", f"Projet exporté vers {filePath}")
+        try:
+            Project().create_project_bundle(self.appData.currentProjectPath, filePath)
+            QMessageBox.information(self, "Succès", f"Projet exporté vers {filePath}")
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Echec de l'exportation: {e}")
     
     def on_worker_finished(self):
         """Called in the main thread when worker emits finished."""
@@ -289,10 +277,9 @@ class OpenProject(QDialog, Ui_OpenProject):
             self.projectDestinationCombo.setCurrentText(directory)
 
     def select_project(self):
-        self.projectFile = QFileDialog.getOpenFileName(self, "Select a project file", "*.nmjnwa")
-        if self.projectFile:
-            self.close()
-            MainWindow().open_existing_project(self.projectFile)
+        # Trigger the main window's open logic
+        if self.parent():
+            self.parent().trigger_open_project()
 
 
 class ImageImport(QWidget, Ui_ImportImage):
@@ -365,6 +352,9 @@ class AfterExtraction(QWidget, Ui_AfterExtraction):
 
         # Iterate over nodes in data
         # Structure is data['nodes'][hostname] = { ... }
+        cprint("Data to show", 'blue')
+        print(self.data)
+        cprint("-------------------------\n", 'blue')
         for hostname, node_infos in self.data['nodes'].items():
             # Header Title = Hostname
             title_label = QLabel(hostname)
@@ -380,27 +370,10 @@ class AfterExtraction(QWidget, Ui_AfterExtraction):
             # routers / switches
             interfaces = node_infos.get("interfaces", {})
 
+            # Initialize columns default
+            columns = [] 
+                
             for if_name, if_data in interfaces.items():
-                # if_data is a dict with details
-                # ip_val = if_data.get("ip", "")
-                    
-                # # Protocol / VLAN
-                # proto_val = if_data.get("protocol", "")
-                # vlan_val = if_data.get("vlan", "")
-                
-                # # Display string for Protocol column
-                # display_proto = ""
-                # if proto_val:
-                #     display_proto = str(proto_val)
-                # if vlan_val:
-                #     prefix = "VLAN: " if display_proto else "VLAN: "
-                #     display_proto = f"{display_proto} | {prefix}{vlan_val}" if display_proto else f"{prefix}{vlan_val}"
-
-                # row_data.append((if_name, ip_val, display_proto, device_type))
-                
-                # Initialize columns default to avoid UnboundLocalError
-                columns = ['interfaces', 'ip', 'protocol'] 
-                
                 if not column_created:
                     columns = [key for key in if_data.keys()] # Store the keys in from the interface dictionnaty as the columns names
                     columns.insert(0, 'interfaces')
@@ -414,6 +387,8 @@ class AfterExtraction(QWidget, Ui_AfterExtraction):
 
             # print(row_data)
 
+            print(columns)
+            
             # Create Table
             table = QTableWidget()
             table.setColumnCount(len(columns))

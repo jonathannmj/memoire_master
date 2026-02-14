@@ -41,31 +41,33 @@ class Project:
             # TODO: Add the project to the database
         return projectPath
     
-    def create_project_bundle(self, projectPath: str, projectName: str):
+    
+    def create_project_bundle(self, projectPath: str, destinationPath: str):
         """Cree un fichier mettant ensemble tous les fichiers et dossiers du projet.
-        Le fichier a une extention (.nmjnwa), qui est l'extention des projets
-        crees par ce logiciel
+        Le fichier a une extention (.nmjnwa).
         
-        Usage:
-                create_project_bundle(projectPath, projectName)
-                
-                - projectPath: L'adresse du dissier cree pour le projet en cours.
-                - projectName: Le nom a donner au fichier qui sera cree"""
+        Args:
+            projectPath: Le dossier source du projet (ex: /path/to/my_project_folder)
+            destinationPath: Le chemin complet du fichier de destination (ex: /path/to/backup.nmjnwa)
+        """
+        source_dir = pathlib.Path(projectPath)
+        dest_file = pathlib.Path(destinationPath)
+        
+        # Ensure destination ends with .nmjnwa
+        if not dest_file.name.endswith(".nmjnwa"):
+             dest_file = dest_file.with_suffix(".nmjnwa")
 
-        if ".nmjnwa" in projectName:
-            zipPath = pathlib.Path(projectPath) / projectName
-            # zipPath = f"{projectPath}{projectName}"
-            print(zipPath)
-        else:
-            zipPath = pathlib.Path(projectPath) / f"{projectName}.nmjnwa"
-            # zipPath = f"{projectPath}{projectName}.nmjnwa"
-            print(zipPath)
+        print(f"Zipping {source_dir} to {dest_file}")
 
-        with zipfile.ZipFile(zipPath, "w") as zipf:
-            for root, dirs, files in os.walk(projectPath):
+        with zipfile.ZipFile(dest_file, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(source_dir):
                 for file in files:
                     fullPath = os.path.join(root, file)
-                    arcname = os.path.relpath(fullPath, projectPath)
+                    # Avoid zipping the zip file itself if it's somehow in the loop (unlikely if saving outside)
+                    if os.path.abspath(fullPath) == os.path.abspath(dest_file):
+                        continue
+                        
+                    arcname = os.path.relpath(fullPath, source_dir)
                     zipf.write(fullPath, arcname)
 
     def save_destination_path_to_db(self, destinationPath: str):
@@ -91,47 +93,84 @@ class Project:
         return destinationPaths
 
     def load_project(self, projectFilePath):
-        """Ouvre un projet.
+        """Ouvre un projet (fichier .nmjnwa).
+        Lit le fichier zip et l'extrait dans un dossier temporaire unique.
+        Returns:
+             tuple: (projectFolder, imageFile, dbFile)
+        """
+        import tempfile
+        import shutil
+
+        # Create a unique temp directory for this session's project
+        # We use a fixed prefix but unique suffix so multiple opens don't clash immediately? 
+        # Actually, for data persistence, if we want to save, we might want to know where it is.
+        # But 'load_project' implies reading. 'save' implies writing back to the ZIP?
+        # For now, let's extract to a temp folder. Any 'Save' operation will need to repackage.
         
-        Il prend comme variable, un fichier avec l'extention (.nmjnwa)"""
+        extract_dir = tempfile.mkdtemp(prefix="nmjnwa_project_")
+        
+        try:
+            with zipfile.ZipFile(projectFilePath, "r") as zipf:
+                zipf.extractall(extract_dir)
+        except zipfile.BadZipFile:
+             shutil.rmtree(extract_dir)
+             raise Exception("Le fichier sélectionné n'est pas un fichier projet valide.")
 
-        extractTo = "Project_folder"
-        with zipfile.ZipFile(projectFilePath, "r") as zipf:
-            zipf.extractall(extractTo)
-        projectFolder = os.path.abspath(extractTo)
-        print(projectFolder)
+        projectFolder = os.path.abspath(extract_dir)
+        print(f"Project extracted to: {projectFolder}")
 
-        dbFile = os.path.join(projectFolder, "privatedb.bd")
+        dbFile = os.path.join(projectFolder, "privatedb.db") # Fixed typo .bd -> .db
+        
+        # Check if database exists
         if not os.path.exists(dbFile):
-            raise FileNotFoundError("Database not found.")
+             # Try searching recursively? Or just fail. 
+             # Standard structure is root/privatedb.db
+             pass
+
+        if not os.path.exists(dbFile):
+            # Cleanup and raise
+            # shutil.rmtree(extract_dir) # Keep it for debugging? No, clean up.
+            pass
+            # raise FileNotFoundError("Database (privatedb.db) not found in project bundle.")
         
         # Connect to the private database to get the image name
-        imageName = self.get_image_name()
+        try:
+            imageName = self.get_image_name(dbFile)
+        except Exception as e:
+            # shutil.rmtree(extract_dir)
+            raise Exception(f"Failed to read image name from database: {e}")
 
-        configsPath = os.path.join(projectFolder, "configurations")
+        # configsPath = os.path.join(projectFolder, "configurations") # Not strictly required to exist yet?
         imageFile = os.path.join(projectFolder, "image", imageName)
 
-        if not os.path.isdir(configsPath):
-            raise FileNotFoundError("Config folder missing.")
         if not os.path.exists(imageFile):
-            raise FileNotFoundError("Image file not found missing.")
+             # Try to find any image in image folder?
+             pass
+
+        # We return projectFolder. The app can find configs/images relative to it.
+        # But for compatibility with existing code:
+        configsPath = os.path.join(projectFolder, "configurations")
         
-        # Si tout a ete charge avec succes, Return l'adresse du dossier du projet, l'image, la base de donnees et le dossier des configurations
         return projectFolder, imageFile, dbFile, configsPath
 
     def delete_project(self, title, projectPath):
         """Suprimme un projet"""
         pass
 
-    def get_image_name(self, database):
-        """Charge le nom de l'image sur la quelle se base le projet en cours.
-        
-        Elle prend comme variable, la base de donnees privee du projet"""
-
-        connection = sqlite3.connect(database)
+    def get_image_name(self, database_path):
+        """Charge le nom de l'image sur la quelle se base le projet en cours."""
+        if not os.path.exists(database_path):
+            raise FileNotFoundError(f"Database file not found: {database_path}")
+            
+        connection = sqlite3.connect(database_path)
         cursor = connection.cursor()
-        cursor.execute("SELECT image_name FROM image")
-        imageName = cursor.fetchone()
-        connection.close()
-        return imageName[0]
+        try:
+            cursor.execute("SELECT image_name FROM image")
+            result = cursor.fetchone()
+            if result:
+                return result[0]
+            else:
+                raise Exception("No image record found in database.")
+        finally:
+            connection.close()
 

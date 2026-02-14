@@ -1,25 +1,25 @@
 import threading
-
-import numpy as np
-import math
-from ultralytics import YOLO
-from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
+import pathlib
 import cv2
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
+
+from ultralytics import YOLO
 import easyocr
 import pytesseract
-from itertools import islice, chain
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 import sqlite3
 import re
 import ipaddress
 import yaml
+from itertools import islice, chain
 
-import pathlib
+import numpy as np
 import shutil
+from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
 from shapely.geometry import LineString, Polygon
 from shapely.ops import nearest_points
+import math
 
 from termcolor import cprint
 
@@ -55,11 +55,11 @@ class TopologyData:
         self.emit_status("Detecting Equipment Details...")
         self.equipment_detection("equipments_detection.pt")
 
-        self.emit_status("Running OCR on Equipments...")
+        self.emit_status("Running OCR on Equipment Zones...")
         self.OCR_on_detected_equipments_zones()
 
-        self.emit_status("Running OCR on Text Zones...")
-        self.OCR_on_detected_text_zones()
+        self.emit_status("Running OCR on Link Text Zones...")
+        self.OCR_on_detected_link_text_zones()
 
         self.emit_status("Processing Text relations...")
         self.text_treatment()
@@ -97,6 +97,22 @@ class TopologyData:
         imagePathInTheProject = shutil.copy(imagePath, imageDirectory)
         cprint(f'Image copied to: {imagePathInTheProject}', "green")
         self.imagePath = imagePathInTheProject
+
+    def convert_width_height_to_points(self, box):
+        """Convert a box (x, y, w, h) into points ((x1, y1), (x2, y2), (x3, y3), (x4, y4))"""
+        (x, y, w, h) = box
+        x1 = x - w/2
+        y1 = y - h/2
+
+        # x1 = xOrigin
+        # y1 = yOrigin
+        # x2 = x1
+        # y2 = y1 + h
+        # x3 = x1 + w
+        # y3 = y2
+        # x4 = x3
+        # y4 = y1
+        return ((x1, y1), (x1, y1 + h), (x1 + w, y1 + h), (x1 + w, y1))
 
     def AI_model_path(self, model):
         """Constitue le chemin vers le modele d'IA a utiliser"""
@@ -619,6 +635,10 @@ class TopologyData:
 
     def is_hostname(self, text):
         """Checks if the text corresponds to a valid hostname."""
+
+        if text.isdigit():
+            return False
+
         # Alphanumeric, hyphens, underscores, dots (for FQDN). Should usually start with a letter/digit.
         pattern = r'^[a-zA-Z0-9]([a-zA-Z0-9\-\_]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-\_]{0,61}[a-zA-Z0-9])?)*$'
         return bool(re.match(pattern, text))
@@ -657,21 +677,19 @@ class TopologyData:
         # Pattern 1: Starts with dot, followed by octet, optionally more dot-octets, optional CIDR
         p1 = r'^\.(\d{1,3})(\.\d{1,3})*(/(3[0-2]|[12]?[0-9]))?$'
         
-        # Pattern 2: Digits.Digits... (partial), count dots < 3 if we want to exclude full IPs? 
-        # Or just anything that looks like IP parts but isn't a full IP.
-        # Simple approach: digits-dot-digits...
+        # Pattern 2: Digits.Digits... (partial)
         p2 = r'^(\d{1,3}\.)+\d{1,3}(/(3[0-2]|[12]?[0-9]))?$'
+
+        # Pattern 3: Simple number (1-3 digits) - e.g. "2", "10"
+        # This is for when OCR misses the dot or it's just the host part
+        p3 = r'^\d{1,3}$'
         
-        if re.match(p1, text):
+        if re.match(p1, text) or re.match(p3, text):
             return True
             
         if re.match(p2, text):
             # Check if it is NOT a complete IP (4 octets)
-            # If it has 3 dots, it might be a complete IP.
             if text.count('.') == 3:
-                 # This is a full IP, so not "uncomplete" in the strict sense?
-                 # But user might consider "uncomplete" category to not include full IPs.
-                 # Let's assume is_uncomplete_ip should generally return True for partials.
                  return False
             return True
             
@@ -704,13 +722,13 @@ class TopologyData:
         if isinstance(texts, list):
             result = []
             for index, text in enumerate(texts):
-                if self.is_hostname(text): result.append((index, 'hostname'))
+                if self.is_interface(text): result.append((index, 'interface'))
+                elif self.is_hostname(text): result.append((index, 'hostname'))
                 elif self.is_protocol(text): result.append((index, 'protocol'))
+                elif self.is_incomplete_ip(text): result.append((index, 'incomplete_ip'))
                 elif self.is_vlan(text): result.append((index, 'vlan'))
                 elif self.is_ip(text): result.append((index, 'ip'))
                 elif self.is_ip_with_mask(text): result.append((index, 'ip'))
-                elif self.is_incomplete_ip(text): result.append((index, 'incomplete_ip'))
-                elif self.is_interface(text): result.append((index, 'interface'))
                 else: result.append((index, 'other'))
             
             return result
@@ -719,10 +737,10 @@ class TopologyData:
             text = texts
             if self.is_hostname(text): return "hostname"
             elif self.is_protocol(text): return "protocol"
+            elif self.is_incomplete_ip(text): return "incomplete_ip"
             elif self.is_vlan(text): return "vlan"
             elif self.is_ip(text): return "ip"
             elif self.is_ip_with_mask(text): return "ip"
-            elif self.is_incomplete_ip(text): return "incomplete_ip"
             elif self.is_interface(text): return "interface"
             else: return "other"
 
@@ -786,25 +804,25 @@ class TopologyData:
         for index in detectedZones:
             zoneWithLinks[index] = []
             zone = detectedZones[index]
-            (x, y, w, h) = zone['box']
-            zoneCenter = (x + w // 2, y + h // 2)
-            halfWay = max(w // 2, h // 2) + 4
-            links = []
-            for linkIndex in detectedLinks:
-                link = detectedLinks[linkIndex]
-                (x1, y1), (x2, y2) = link['points']
-                # Determination de la distance entre le point et le centre de la zone
-                if 0 < math.sqrt((x1 - zoneCenter[0])**2 + (y1 - zoneCenter[1])**2) < halfWay:
-                    point = (x1, y1)
-                    links.append((linkIndex, point))
-                elif 0 < math.sqrt((x2 - zoneCenter[0])**2 + (y2 - zoneCenter[1])**2) < halfWay:
-                    point = (x2, y2)
-                    links.append((linkIndex, point))
+            zone_points = self.convert_width_height_to_points(zone['box'])
+            closestLinks = self.closest_to_the_box(zone_points, detectedLinks.keys(), True)
+            # (x, y, w, h) = zone['box']
+            # zoneCenter = (x + w // 2, y + h // 2)
+            # halfWay = max(w // 2, h // 2) + 4
+            # links = []
+            # for linkIndex in detectedLinks:
+            #     link = detectedLinks[linkIndex]
+            #     (x1, y1), (x2, y2) = link['points']
+            #     # Determination de la distance entre le point et le centre de la zone
+            #     if 0 < math.sqrt((x1 - zoneCenter[0])**2 + (y1 - zoneCenter[1])**2) < halfWay:
+            #         point = (x1, y1)
+            #         links.append((linkIndex, point))
+            #     elif 0 < math.sqrt((x2 - zoneCenter[0])**2 + (y2 - zoneCenter[1])**2) < halfWay:
+            #         point = (x2, y2)
+            #         links.append((linkIndex, point))
             
-            if links:
-                links = set(links)  # Remove duplicates
-                for link in links:
-                    zoneWithLinks[index].append((link[0], link[1]))
+            if closestLinks:
+                zoneWithLinks[index] = closestLinks
         
         self.zoneWithLinks = zoneWithLinks
 
@@ -820,6 +838,13 @@ class TopologyData:
             if link:
                 linked[link] = (i, i+1)
 
+        cprint(f'LINKED', 'green')
+        cprint(linked, 'green')
+        cprint(f'Detected zones\n{detectedZones}', 'yellow')
+        cprint(f'Detected links\n{detectedLinks}', 'blue')
+        cprint(f'Zone with links\n{zoneWithLinks}', 'green')
+        cprint('----------------------------\n', 'green')
+
         self.linkedEquipments = linked
 
     def are_zones_linked(self, zone1, zone2):
@@ -829,11 +854,11 @@ class TopologyData:
                 if link1[0] == link2[0]:
                     return link1
             
-    def closest_to_the_box(self, textBox, linksList):
+    def closest_to_the_box(self, box, linksList, multiple = False):
         """Determines the shortest path between the text box and the links
 
         It takes as inputs:
-        - textBox: (x, y, w, h)
+        - box: (x, y, w, h)
         - links: {link_id: {'points': ((x1, y1), (x2, y2)), 'box': (x, y, w, h, r)}}
 
         It returns:
@@ -841,7 +866,7 @@ class TopologyData:
         - distance: the distance between the box and the closest link
         """
         links = self.links
-        ((x1, y1), (x2, y2), (x3, y3), (x4, y4)) = textBox
+        ((x1, y1), (x2, y2), (x3, y3), (x4, y4)) = box
         box = [(x1, y1), (x2, y2), (x3, y3), (x4, y4)] # Coordinates of the points of the box
         rectangle = Polygon(box) # Rectangle representing the box
 
@@ -849,21 +874,34 @@ class TopologyData:
         minDistance = float('inf')
         closestLink = None
 
-        for linkIndex in linksList:
-            link = links[linkIndex]['points']
-            linkLine = LineString(link) # Line representing the link
+        if not multiple:
+            for linkIndex in linksList:
+                link = links[linkIndex]['points']
+                linkLine = LineString(link) # Line representing the link
 
-            # use nearest_points
-            p_rect, p_link = nearest_points(rectangle.boundary, linkLine)
-            distance = p_rect.distance(p_link)
-            if distance < minDistance:
-                minDistance = distance
-                closestLink = linkIndex
+                # use nearest_points
+                p_rect, p_link = nearest_points(rectangle.boundary, linkLine)
+                distance = p_rect.distance(p_link)
+                if distance < minDistance:
+                    minDistance = distance
+                    closestLink = linkIndex
 
-        if closestLink is None:
-            return None, None
+            if closestLink is None:
+                return None, None
+            else:
+                return closestLink, minDistance
+        else:
+            closests = []
+            for index in linksList:
+                link = links[index]['points']
+                linkLine = LineString(link) # Line representing the link
 
-        return closestLink, minDistance
+                # use nearest_points
+                p_rect, p_link = nearest_points(rectangle.boundary, linkLine)
+                distance = p_rect.distance(p_link)
+                if distance < 2:
+                    closests.append((index, distance))
+            return closests
 
     def create_links(self, linked):
         """Create links between zones and lines"""
@@ -878,8 +916,11 @@ class TopologyData:
         # OCR on each detected zone
         # Or Targeted OCR
         self.extractedTextForEquipmentZones = self.targeted_OCR(image, self.detected_equipments_zones)
+        cprint("Text from equipments zones", 'blue')
+        print(self.extractedTextForEquipmentZones)
+        cprint("----------------------------\n", 'blue')
 
-    def OCR_on_detected_text_zones(self):
+    def OCR_on_detected_link_text_zones(self):
         """OCR on detected zones of text"""
 
         # Detection des zones de texte
@@ -913,33 +954,81 @@ class TopologyData:
         length = len(detected_zones)
         step = length // 3
 
+        # cprint("Detected zones", 'blue')
+        # print(f'# {length}')
+        # print(detected_zones)
+        # cprint("-------------------------\n", 'blue')
+
+        # cprint("Detected zones slices", 'blue')
+        # print(dict(islice(detected_zones.items(), 0, step)))
+        # print(dict(islice(detected_zones.items(), step, step*2)))
+        # print(dict(islice(detected_zones.items(), step*2, length)))
+        # cprint("--------------------------\n", 'blue')
+
         # Initialize the dictionnaries where will be saved the results
         result1 = {}
         result2 = {}
         result3 = {}
         
-        def OCR(zones, result):
+        # Instantiate the reader once
+        reader = easyocr.Reader(['en', 'fr'])
+
+        def OCR(zones, result, reader_instance):
             for index in zones:
                 result[index] = {}
                 (x, y, w, h) = zones[index]['box']
                 xOrigin = x - w/2
                 yOrigin = y - h/2
+                
+                # Extract region of interest
                 regionOfInterest = image[int(yOrigin) : int(y+h), int(xOrigin) : int(x+w)]
 
-                # Read text from the zone with 'easyocr'
-                reader = easyocr.Reader(['en', 'fr'])
-                ocrResult = reader.readtext(image=regionOfInterest)
+                if regionOfInterest.size == 0:
+                    continue
+
+                # --- Preprocessing for better OCR accuracy ---
+                # 1. Convert to grayscale
+                gray = cv2.cvtColor(regionOfInterest, cv2.COLOR_BGR2GRAY)
+
+                # 2. Upscale the image (3x helps with small text)
+                scale_factor = 3
+                upscaled = cv2.resize(gray, None, fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_CUBIC)
+
+                # 3. Add padding (white border) - critical for text touching edges
+                # Add 10px white border (assuming grayscale 255 is white)
+                padding = 10
+                padded = cv2.copyMakeBorder(upscaled, padding, padding, padding, padding, cv2.BORDER_CONSTANT, value=255)
+
+                # 4. Optional: Denoising / Thresholding (can sometimes help, but easyocr handles some internally)
+                # For now, we'll rely on easyocr's adjust_contrast, but upscaling is critical.
+                
+                # Debug: save processed image (optional)
+                # cv2.imwrite(f"debug_ocr_{index}.png", padded)
+                
+                # Read the text from the zone with 'easyocr'
+                ocrResult = reader_instance.readtext(
+                    padded,
+                    adjust_contrast=0.5,
+                    text_threshold=0.5, # Lowered from 0.6
+                    low_text=0.3,       # Lowered from 0.4
+                    mag_ratio=1.0       # We already upscaled
+                )
+
+                # cprint("OCR result", 'green')
+                # print(ocrResult)
+                # cprint("----------------------\n", 'green')
 
                 counter = 0
                 for (bbox, text, probability) in ocrResult:
-                    if probability >= 0.7:   # Keep only the data with a probability greater or equal to 70%
+                    if probability >= 0.5:   # Lowered threshold slightly to catch more potential matches
                         result[index][counter] = {'text': text, 'coordinates': bbox}
                         counter += 1
 
         # Create a thread to do the classification on each part of the list
-        thread_1 = threading.Thread(target=OCR, args=(dict(islice(detected_zones.items(), 0, step)), result1,))
-        thread_2 = threading.Thread(target=OCR, args=(dict(islice(detected_zones.items(), step, step*2)), result2,))
-        thread_3 = threading.Thread(target=OCR, args=(dict(islice(detected_zones.items(), step*2, length)), result3,))
+        # Note: arguments must match the target function signature
+        thread_1 = threading.Thread(target=OCR, args=(dict(islice(detected_zones.items(), 0, step)), result1, reader))
+        thread_2 = threading.Thread(target=OCR, args=(dict(islice(detected_zones.items(), step, step*2)), result2, reader))
+        thread_3 = threading.Thread(target=OCR, args=(dict(islice(detected_zones.items(), step*2, length)), result3, reader))
 
         # Start the threads
         thread_1.start()
@@ -951,66 +1040,22 @@ class TopologyData:
         thread_2.join()
         thread_3.join()
 
+        # cprint("OCR results", 'blue')
+        # cprint("result 1", 'green')
+        # print(result1)
+        # cprint("result 2", 'green')
+        # print(result2)
+        # cprint("result 3", 'green')
+        # print(result3)
+        # cprint("-------------------------\n", 'blue')
+
         extractedText = dict(chain(result1.items(), result2.items(), result3.items()))
-
-        # Flatten texts for classification
-        texts = [cell['text'] for sub in extractedText.values() for cell in sub.values()]
-
-        results = self.classify_text(texts)
-
-        def classify():
-            length = len(texts)
-            step = length // 4  # Divide the list of texts by four
-
-            # Lists where to store the data for the text_classification
-            result1 = []
-            result2 = []
-            result3 = []
-            result4 = []
-
-            # Create a thread to do the classification on each part of the list
-            thread_1 = threading.Thread(target=self.classify_text, args=(texts[0:step], result1, 0,))
-            thread_2 = threading.Thread(target=self.classify_text, args=(texts[step:step*2], result2, step,))
-            thread_3 = threading.Thread(target=self.classify_text, args=(texts[step*2:step*3], result3, step*2,))
-            thread_4 = threading.Thread(target=self.classify_text, args=(texts[step*3:length], result4, step*3,))
+        cprint("Extracted text", 'red')
+        print(extractedText)
+        cprint("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@", 'red')
             
-            # Start the threads
-            thread_1.start()
-            thread_2.start()
-            thread_3.start()
-            thread_4.start()
-            
-            # Wait for all the threads to finish their work before continuing
-            thread_1.join()
-            thread_2.join()
-            thread_3.join()
-            thread_4.join()
-            
-            cprint("Print results from threads", 'blue')
-            print(result1)
-            print(result2)
-            print(result3)
-            print(result4)
-            cprint("____________________________\n")
-            
-        index = 0
-        for subdict in extractedText.values():
-            for data in subdict.values():
-                if 'fo/0' in data['text']:
-                    data['text'] = 'f0/0'
-                    data['class'] = results[index][1]
-                else:
-                    data['class'] = results[index][1]
-                index += 1
-            
-            return extractedText
-        
-        if texts:
-            extracted_and_classified_text = classify()
-            return extracted_and_classified_text
-        else:
-            return None
-    
+        return extractedText
+
     def closest_to_the_link(self, link):
         """Determine la distance la plus faible entre le lien et la zone de texte
 
@@ -1023,23 +1068,13 @@ class TopologyData:
         textZones = self.detected_linktext_zones
         zoneDistancePair = []
         for index in textZones:
-            (x, y, w, h) = textZones[index]['box']
-            xOrigin = x - w/2
-            yOrigin = y - h/2
+            # Convert width and height box to four points box
+            text_points = self.convert_width_height_to_points(textZones[index]['box'])
 
-            x1 = xOrigin
-            y1 = yOrigin
-            x2 = x1
-            y2 = y1 + h
-            x3 = x1 + w
-            y3 = y2
-            x4 = x3
-            y4 = y1
+            # Text zone rectangle
+            rectangle = Polygon(text_points)
 
-            # Definition du rectangle de la zone de texte
-            rectangle = Polygon(((x1, y1), (x2, y2), (x3, y3), (x4, y4)))
-
-            # Ligne representant le lien
+            # Link line
             linkLine = LineString(link)
 
             # Skip invalid rectangles
@@ -1047,19 +1082,17 @@ class TopologyData:
                 continue
 
             # Determine the closest points between the link and the rectangle boundary
-            pointOnLink, p_on_rect = nearest_points(linkLine, rectangle.boundary)
-            closestPoint = p_on_rect
-            distance = pointOnLink.distance(p_on_rect)
+            pointOnLink, p_on_rectangle = nearest_points(linkLine, rectangle.boundary)
+            distance = pointOnLink.distance(p_on_rectangle)
             zoneDistancePair.append((index, distance))
         
         # Guard against empty list to avoid ValueError from min()
         if not zoneDistancePair:
             return None, None
-
-        closestText = min(zoneDistancePair, key= lambda x : x[1])
-
-        return closestText
-
+        else:
+            # Return the index of the text zone with the minimum distance and the minimum distance
+            return min(zoneDistancePair, key=lambda x: x[1])
+        
     def link_text_to_links(self, text):
         """
         Links text to the corresponding links
@@ -1084,10 +1117,8 @@ class TopologyData:
         return textOnLinks
     
     def text_treatment(self):
-        """We have:  
-        - The equipments zones
-        - The extracted text by equipment zone
-        - the zones links
+        """
+        Process the extracted text and links data to create a topology data structure
         """
         extracted_text = self.extractedTextForEquipmentZones
         links_text = self.textOnLinks
@@ -1099,12 +1130,10 @@ class TopologyData:
             filtered_text[zone_index] = {
                 'device': device,
                 'hostname': None,
-                'ip_address': None,
                 'interfaces': {},
                 'ip_addresses': {},
             }
-            for text_index in extracted_text[zone_index].keys():
-                text_entry = extracted_text[zone_index][text_index]
+            for text_index, text_entry in extracted_text[zone_index].items():
                 text = text_entry.get('text')
                 cls = text_entry.get('class')
                 
@@ -1113,28 +1142,39 @@ class TopologyData:
                         filtered_text[zone_index]['hostname'] = text
                     case 'interface':
                         closest_link, _ = self.closest_to_the_box(text_entry.get('coordinates'), zoneLinks)
-                        filtered_text[zone_index]['interfaces'][closest_link] = text
+                        if closest_link is not None:
+                             filtered_text[zone_index]['interfaces'][closest_link] = text
                     case 'ip':
-                        if device != 'pc' or device != 'server':
+                        if device != 'pc' and device != 'server':
                             closest_link, _ = self.closest_to_the_box(text_entry.get('coordinates'), zoneLinks)
-                            filtered_text[zone_index]['ip_addresses'][closest_link] = text
+                            if closest_link is not None:
+                                filtered_text[zone_index]['ip_addresses'][closest_link] = text
                         else:
                             filtered_text[zone_index]['ip_address'] = text
                     case 'incomplete_ip':
                         closest_link, _ = self.closest_to_the_box(text_entry.get('coordinates'), zoneLinks)
 
+                        cprint(f"\nINCOMPLETE IP: {text}", 'yellow')
+
+                        if closest_link is None:
+                            continue
+
                         # Get the ip from the closest link
-                        network_ip = links_text[closest_link]['text'] if links_text[closest_link]['class'] == 'ip' else None
+                        # Add safer get for links_text
+                        link_data = links_text.get(closest_link, {})
+                        network_ip = link_data.get('text') if link_data.get('class') == 'ip' else None
+
+                        cprint(f"NETWORK IP: {network_ip}", 'yellow')
+                        cprint(f"CLOSEST LINK: {closest_link}", 'yellow')
                         
                         if network_ip:
                             # Complete the ip address based on the network_ip
                             complete_ip = self.complete_the_ip_address(text, network_ip)
-
-                            print(f'{text} : {complete_ip}')
+                            cprint(f'COMPLETE IP: {complete_ip}', 'yellow')
                         else:
                             complete_ip = text
 
-                        if device != 'pc' or device != 'server':
+                        if device != 'pc' and device != 'server':
                             filtered_text[zone_index]['ip_addresses'][closest_link] = complete_ip
                         else:
                             filtered_text[zone_index]['ip_address'] = complete_ip
@@ -1150,8 +1190,9 @@ class TopologyData:
         # Network address gathering
         try:
             network = ipaddress.IPv4Network(network_id)
-        except e:
-            print(f"Error while trying to complete the ip address.\nError: {e}")
+        except Exception as e:
+            cprint(f"Error while trying to complete the ip address: {e}", 'red')
+            return None
 
         network_add = network.network_address
         netmask = network.netmask
@@ -1159,9 +1200,9 @@ class TopologyData:
 
         # Remove CIDR mask from incomplete_ip if present
         if '/' in incomplete_ip:
-            incomplete_ip = incomplete_ip.split('/')[0]
-
-        incomplete_ip_list = incomplete_ip.split('.')
+            incomplete_ip = str(incomplete_ip).split('/')[0]
+        
+        incomplete_ip_list = str(incomplete_ip).split('.')
         incomplete_ip_list = [el for el in incomplete_ip_list if el != ' ' or el != '']
 
         # Determine the host part
@@ -1171,28 +1212,38 @@ class TopologyData:
         for i, mask in enumerate(netmask_list):
             if mask != '255':
                 step = 256 - int(mask) # Determine possible host values range
+                hostbytes = len(incomplete_ip_list)
                 match i:
                     # Return complete address
                     case 0:
                         return None
                     case 1:
-                        if not incomplete_ip_list[-3]: return None
-                        elif int(incomplete_ip_list[-3]) not in range(int(network_add_list[1]) + 1, step - 1):
-                            return None
-                        else:
-                            return f"{network_add_list[0]}.{incomplete_ip_list[-3]}.{incomplete_ip_list[-2]}.{incomplete_ip_list[-1]}/{str(prefix_len)}"
+                        if hostbytes >= 3: 
+                            if int(incomplete_ip_list[-3]) in range(int(network_add_list[1]) + 1, step - 1):
+                                return f"{network_add_list[0]}.{incomplete_ip_list[-3]}.{incomplete_ip_list[-2]}.{incomplete_ip_list[-1]}/{str(prefix_len)}"
+                            else: return None
+                        elif hostbytes == 2:
+                            if int(incomplete_ip_list[-2]) in range(int(network_add_list[1]) + 1, step - 1):
+                                return f"{network_add_list[0]}.{network_add_list[1]}.{incomplete_ip_list[-2]}.{incomplete_ip_list[-1]}/{str(prefix_len)}"
+                            else: return None
+                        elif hostbytes == 1:
+                            if int(incomplete_ip_list[-1]) in range(int(network_add_list[1]) + 1, step - 1):
+                                return f"{network_add_list[0]}.{network_add_list[1]}.{network_add_list[2]}.{incomplete_ip_list[-1]}/{str(prefix_len)}"
+                            else: return None
                     case 2:
-                        if not incomplete_ip_list[-2]: return None
-                        elif int(incomplete_ip_list[-2]) not in range(int(network_add_list[2]) + 1, step - 1):
-                            return None
-                        else:
-                            return f"{network_add_list[0]}.{network_add_list[1]}.{incomplete_ip_list[-2]}.{incomplete_ip_list[-1]}/{str(prefix_len)}"
+                        if hostbytes >= 2:
+                            if int(incomplete_ip_list[-2]) in range(int(network_add_list[2]) + 1, step - 1):
+                                return f"{network_add_list[0]}.{network_add_list[1]}.{incomplete_ip_list[-2]}.{incomplete_ip_list[-1]}/{str(prefix_len)}"
+                            else: return None
+                        elif hostbytes == 1:
+                            if int(incomplete_ip_list[-1]) in range(int(network_add_list[2]) + 1, step - 1):
+                                return f"{network_add_list[0]}.{network_add_list[1]}.{network_add_list[2]}.{incomplete_ip_list[-1]}/{str(prefix_len)}"
+                            else: return None
                     case 3:
-                        if not incomplete_ip_list[-1]: return None
-                        elif int(incomplete_ip_list[-1]) not in range(int(network_add_list[3]) + 1, step - 1):
-                            return None
-                        else:
-                            return f"{network_add_list[0]}.{network_add_list[1]}.{network_add_list[2]}.{incomplete_ip_list[-1]}/{str(prefix_len)}"
+                        if hostbytes == 1:
+                            if int(incomplete_ip_list[-1]) in range(int(network_add_list[3]) + 1, step - 1):
+                                return f"{network_add_list[0]}.{network_add_list[1]}.{network_add_list[2]}.{incomplete_ip_list[-1]}/{str(prefix_len)}"
+                            else: return None
 
     def is_data_extracted(self, currentProjectPath):
         privateDB = pathlib.Path(currentProjectPath)/"privateDB.db"
@@ -1216,6 +1267,8 @@ class TopologyData:
 
     def format_data_for_yaml(self, zoneTextsLink):
         """Format data for YAML generation."""
+
+        print(zoneTextsLink)
         
         # Dependencies
         links_map = getattr(self, "links_text_map", {})
@@ -1266,7 +1319,7 @@ class TopologyData:
                         link_meta = links_map.get(link_id, {})
                         
                         # Get IP
-                        ip_addr = "<ip_address>"
+                        ip_addr = ""
                         if 'ip_addresses' in links_info and link_id in links_info['ip_addresses']:
                             ip_addr = links_info['ip_addresses'][link_id]
                         elif 'ip_add' in links_info and link_id in links_info['ip_add']:
@@ -1356,3 +1409,22 @@ class TopologyData:
             yaml.dump(data, yaml_file, default_flow_style=False)
 
         cprint("Data saved in the yaml files (host_vars + group_vars/all.yml)", 'green')
+
+    def load_data_from_yaml(self, currentProjectPath):
+        """Load data from group_vars/all.yml if it exists."""
+        project_path = pathlib.Path(currentProjectPath)
+        all_vars_path = project_path / "group_vars" / "all.yml"
+        
+        if not all_vars_path.exists():
+            return None
+            
+        try:
+            with open(all_vars_path, "r", encoding="utf-8") as f:
+                nodes_data = yaml.safe_load(f)
+            
+            if nodes_data:
+                return {"nodes": nodes_data}
+            return None
+        except Exception as e:
+            cprint(f"Error loading YAML data: {e}", 'red')
+            return None
