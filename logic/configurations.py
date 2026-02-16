@@ -91,37 +91,51 @@ class Configurations:
             host_vars['device_type'] = device_type
             host_vars['currentProjectPath'] = self.projectFolder
             
-            # Special handling for PCs: map 'ip' to 'interfaces' list with 'eth0'
-            # Special handling for PCs: ensure interfaces is a list with broken down IP details
+            # Standardize 'interfaces' to be a list of dictionaries with 'name' attribute
+            # This ensures compatibility with all templates (router.j2, switch.j2, pc.j2)
+            if 'interfaces' in host_vars and isinstance(host_vars['interfaces'], dict):
+                interfaces_list = []
+                for if_name, if_data in host_vars['interfaces'].items():
+                    if isinstance(if_data, dict):
+                        # Create a new dict to avoid modifying the original reference if shared
+                        new_if_data = if_data.copy()
+                        new_if_data['name'] = if_name
+                        interfaces_list.append(new_if_data)
+                    else:
+                        # Handle case where val might not be dict (unlikely based on topology_data)
+                        interfaces_list.append({'name': if_name})
+                host_vars['interfaces'] = interfaces_list
+            elif 'interfaces' not in host_vars:
+                host_vars['interfaces'] = []
+
+            # Special handling for PCs: ensure robust IP handling
             if device_type == 'pc':
-                # Check for IP at root (legacy) or in interfaces dict (new format)
+                # If we have legacy 'ip' at root, ensure it's in an interface
                 ip_cidr = host_vars.get('ip')
-                iface_name = 'eth0'
                 
-                if not ip_cidr and 'interfaces' in host_vars and isinstance(host_vars['interfaces'], dict):
-                    # Find first interface with IP
-                    for key, values in host_vars['interfaces'].items():
-                        if isinstance(values, dict) and 'ip' in values:
-                            ip_cidr = values['ip']
-                            iface_name = key
-                            break
-                            
-                if ip_cidr:
+                # Check if we already have an interface with IP
+                has_ip_interface = False
+                for iface in host_vars['interfaces']:
+                    if 'ip' in iface or 'address' in iface:
+                        has_ip_interface = True
+                        break
+                
+                if not has_ip_interface and ip_cidr:
+                    # Create default eth0 interface
                     try:
-                        # Calculate IP and Netmask using python's ipaddress module
                         iface_obj = ipaddress.ip_interface(ip_cidr)
-                        host_vars['interfaces'] = [{
-                            'name': iface_name,
+                        host_vars['interfaces'].append({
+                            'name': 'eth0',
                             'address': str(iface_obj.ip),
-                            'netmask': str(iface_obj.netmask)
-                        }]
+                            'netmask': str(iface_obj.netmask),
+                            'ip': ip_cidr # Keep raw cidr just in case
+                        })
                     except ValueError as e:
                         print(f"Error parsing IP for {hostname}: {e}")
-                        # Fallback if parsing fails
-                        host_vars['interfaces'] = [{
-                            'name': iface_name,
+                        host_vars['interfaces'].append({
+                            'name': 'eth0',
                             'ip': ip_cidr
-                        }]
+                        })
             
             # Write host_vars to file
             host_var_path = os.path.join(host_vars_dir, f"{hostname}.yml")

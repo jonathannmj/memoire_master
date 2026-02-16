@@ -14,15 +14,12 @@ from UI.modify_data.modify_ui import Ui_ModifyData
 from UI.data_extracting.data_extracting_ui import Ui_DataExtraction
 from UI.configs_content.configs_content_page import Ui_ConfigsContentPage
 
-from Classes.project import Project
-from Classes.topology_data import TopologyData
-from Classes.configurations import Configurations
+from logic.project import Project
+from logic.topology_data import TopologyData
+from logic.configurations import Configurations
 
 from termcolor import cprint
 
-
-# Global variables
-imagePath = None
 
 class MainWindow(QMainWindow, Ui_MainWindow):
     def __init__(self, parent=None):

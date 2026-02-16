@@ -2,14 +2,14 @@ hostname {{ inventory_hostname }}
 !
 no ip domain lookup
 !
-{% for interface, details in interfaces.items() %}
-interface {{ interface }}
- description Link to {{ details.neighbor | default('unknown') }}
-{% if details.portMode is defined %}
- switchport mode {{ details.portMode }}
+{% for interface in interfaces %}
+interface {{ interface.name }}
+ description Link to {{ interface.neighbor | default('unknown') }}
+{% if interface.portMode is defined %}
+ switchport mode {{ interface.portMode }}
 {% endif %}
-{% if details.vlan is defined %}
- switchport access vlan {{ details.vlan | replace('vlan', '') | default('1') }}
+{% if interface.vlan is defined %}
+ switchport access vlan {{ interface.vlan | replace('vlan', '') | default('1') }}
 {% endif %}
  no shutdown
  exit

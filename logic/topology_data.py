@@ -4,6 +4,7 @@ import cv2
 
 from ultralytics import YOLO
 import easyocr
+from paddleocr import PaddleOCR
 import pytesseract
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -41,13 +42,13 @@ class TopologyData:
         self.import_the_image(imagePath, currentProjectPath)
 
         self.emit_status("Running Zones Detection...")
-        self.zones_detection("zones_detection_x.pt")
+        self.detect_zones("zones_detection_x.pt")
 
         self.emit_status("Detecting Links...")
-        self.links_detection("links_detection.pt")
+        self.detect_links("links_detection.pt")
 
         self.emit_status("Detecting Equipment Details...")
-        self.equipment_detection("equipments_detection.pt")
+        self.equipment_detection("detect_equipment.pt")
 
         self.emit_status("Running OCR on Equipment Zones...")
         self.OCR_on_detected_equipments_zones()
@@ -56,7 +57,7 @@ class TopologyData:
         self.OCR_on_detected_link_text_zones()
 
         self.emit_status("Processing Text relations...")
-        self.text_treatment()
+        self.process_text()
         self.links_text_treatment()
         
         # Prepare enriched data for export/return
@@ -116,7 +117,7 @@ class TopologyData:
         modelPath = pathlib.Path(modelsDirectory) / model
         return modelPath
 
-    def zones_detection(self, model: str):
+    def detect_zones(self, model: str):
         """Zones detection
 
         It uses YOLO, and the model zones_detection_x.pt, to detect:
@@ -230,7 +231,7 @@ class TopologyData:
 
         return mask
 
-    def links_detection(self, model):
+    def detect_links(self, model):
         """Detection des lignes jouants le role de lien etre deux equipements avec YOLO11  
         
         Un model de Oriented Bounding Box est utilise pour detecter les zones des liens, puis les boxes sont transformees en lignes"""
@@ -833,8 +834,29 @@ class TopologyData:
         # OCR on each detected zone
         # Or Targeted OCR
         self.extractedTextForEquipmentZones = self.targeted_OCR(image, self.detected_equipments_zones)
-        cprint("Text from equipments zones", 'blue')
-        print(self.extractedTextForEquipmentZones)
+
+        # classify text        
+        # 1 Make a list of all the text
+        all_text = []
+        for zone in self.extractedTextForEquipmentZones:
+            for text in self.extractedTextForEquipmentZones[zone]:
+                all_text.append(self.extractedTextForEquipmentZones[zone][text]['text'])
+
+        print(f'all_text\n{all_text}')
+
+        #2 Classify the list text
+        classes = self.classify_text(all_text)
+        print(f'classes\n{classes}')
+
+        #3 Put the classified text in the extractedTextForEquipmentZones
+        index = 0
+        for zone in self.extractedTextForEquipmentZones:
+            for text in self.extractedTextForEquipmentZones[zone]:
+                self.extractedTextForEquipmentZones[zone][text]['class'] = classes[index][1]
+                index += 1
+
+        # cprint("Text from equipments zones", 'blue')
+        # print(self.extractedTextForEquipmentZones)
         cprint("----------------------------\n", 'blue')
 
     def OCR_on_detected_link_text_zones(self):
@@ -868,81 +890,22 @@ class TopologyData:
         length = len(detected_zones)
         step = length // 3
 
-        # cprint("Detected zones", 'blue')
-        # print(f'# {length}')
-        # print(detected_zones)
-        # cprint("-------------------------\n", 'blue')
-
-        # cprint("Detected zones slices", 'blue')
-        # print(dict(islice(detected_zones.items(), 0, step)))
-        # print(dict(islice(detected_zones.items(), step, step*2)))
-        # print(dict(islice(detected_zones.items(), step*2, length)))
-        # cprint("--------------------------\n", 'blue')
-
         # Initialize the dictionnaries where will be saved the results
         result1 = {}
         result2 = {}
         result3 = {}
         
         # Instantiate the reader once
-        reader = easyocr.Reader(['en', 'fr'])
-
-        def OCR(zones, result, reader_instance):
-            for index in zones:
-                result[index] = {}
-                (x, y, w, h) = zones[index]['box']
-                xOrigin = x - w/2
-                yOrigin = y - h/2
-                
-                # Extract region of interest
-                regionOfInterest = image[int(yOrigin) : int(y+h), int(xOrigin) : int(x+w)]
-
-                if regionOfInterest.size == 0:
-                    continue
-
-                # --- Preprocessing for better OCR accuracy ---
-                # 1. Convert to grayscale
-                gray = cv2.cvtColor(regionOfInterest, cv2.COLOR_BGR2GRAY)
-
-                # 2. Upscale the image (3x helps with small text)
-                scale_factor = 3
-                upscaled = cv2.resize(gray, None, fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_CUBIC)
-
-                # 3. Add padding (white border) - critical for text touching edges
-                # Add 10px white border (assuming grayscale 255 is white)
-                padding = 10
-                padded = cv2.copyMakeBorder(upscaled, padding, padding, padding, padding, cv2.BORDER_CONSTANT, value=255)
-
-                # 4. Optional: Denoising / Thresholding (can sometimes help, but easyocr handles some internally)
-                # For now, we'll rely on easyocr's adjust_contrast, but upscaling is critical.
-                
-                # Debug: save processed image (optional)
-                # cv2.imwrite(f"debug_ocr_{index}.png", padded)
-                
-                # Read the text from the zone with 'easyocr'
-                ocrResult = reader_instance.readtext(
-                    padded,
-                    adjust_contrast=0.5,
-                    text_threshold=0.5, # Lowered from 0.6
-                    low_text=0.3,       # Lowered from 0.4
-                    mag_ratio=1.0       # We already upscaled
-                )
-
-                # cprint("OCR result", 'green')
-                # print(ocrResult)
-                # cprint("----------------------\n", 'green')
-
-                counter = 0
-                for (bbox, text, probability) in ocrResult:
-                    if probability >= 0.5:   # Lowered threshold slightly to catch more potential matches
-                        result[index][counter] = {'text': text, 'coordinates': bbox}
-                        counter += 1
+        # Instantiate separate PaddleOCR instances for each thread to ensure thread safety
+        # Also disable MKLDNN to avoid PIR conversion errors
+        reader_1 = PaddleOCR(use_angle_cls=True, lang='en', enable_mkldnn=False, return_word_box=True)
+        reader_2 = PaddleOCR(use_angle_cls=True, lang='en', enable_mkldnn=False, return_word_box=True)
+        reader_3 = PaddleOCR(use_angle_cls=True, lang='en', enable_mkldnn=False, return_word_box=True)
 
         # Create a thread to do the classification on each part of the list
-        # Note: arguments must match the target function signature
-        thread_1 = threading.Thread(target=OCR, args=(dict(islice(detected_zones.items(), 0, step)), result1, reader))
-        thread_2 = threading.Thread(target=OCR, args=(dict(islice(detected_zones.items(), step, step*2)), result2, reader))
-        thread_3 = threading.Thread(target=OCR, args=(dict(islice(detected_zones.items(), step*2, length)), result3, reader))
+        thread_1 = threading.Thread(target=self.paddleOCR, args=(image, dict(islice(detected_zones.items(), 0, step)), result1, reader_1))
+        thread_2 = threading.Thread(target=self.paddleOCR, args=(image, dict(islice(detected_zones.items(), step, step*2)), result2, reader_2))
+        thread_3 = threading.Thread(target=self.paddleOCR, args=(image, dict(islice(detected_zones.items(), step*2, length)), result3, reader_3))
 
         # Start the threads
         thread_1.start()
@@ -954,21 +917,135 @@ class TopologyData:
         thread_2.join()
         thread_3.join()
 
-        # cprint("OCR results", 'blue')
-        # cprint("result 1", 'green')
-        # print(result1)
-        # cprint("result 2", 'green')
-        # print(result2)
-        # cprint("result 3", 'green')
-        # print(result3)
-        # cprint("-------------------------\n", 'blue')
-
         extractedText = dict(chain(result1.items(), result2.items(), result3.items()))
         cprint("Extracted text", 'red')
         print(extractedText)
         cprint("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@", 'red')
             
         return extractedText
+
+    def easyOCR(self, image, zones, result, reader_instance):
+        for index in zones:
+            result[index] = {}
+            (x, y, w, h) = zones[index]['box']
+            xOrigin = x - w/2
+            yOrigin = y - h/2
+            
+            # Extract region of interest
+            regionOfInterest = image[int(yOrigin) : int(y+h), int(xOrigin) : int(x+w)]
+
+            if regionOfInterest.size == 0:
+                continue
+
+            # --- Preprocessing for better OCR accuracy ---
+            # 1. Convert to grayscale
+            gray = cv2.cvtColor(regionOfInterest, cv2.COLOR_BGR2GRAY)
+
+            # 2. Upscale the image (3x helps with small text)
+            scale_factor = 3
+            upscaled = cv2.resize(gray, None, fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_CUBIC)
+
+            # 3. Add padding (white border) - critical for text touching edges
+            # Add 10px white border (assuming grayscale 255 is white)
+            padding = 10
+            padded = cv2.copyMakeBorder(upscaled, padding, padding, padding, padding, cv2.BORDER_CONSTANT, value=255)
+
+            # 4. Optional: Denoising / Thresholding (can sometimes help, but easyocr handles some internally)
+            threshold = cv2.threshold(padded, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+
+            # 5. Optional: Noise Reduction (can help with very noisy images)
+            denoised = cv2.fastNlMeansDenoising(threshold, None, h=10, templateWindowSize=7, searchWindowSize=21)
+            
+            # 6. Optional: Image Enhancement (can help with low contrast)
+            enhanced = cv2.equalizeHist(denoised)
+
+            # 7 Increase contrast
+            enhanced = cv2.convertScaleAbs(enhanced, alpha=2, beta=0)
+            
+            # Debug: save processed image (optional)
+            # cv2.imwrite(f"debug_ocr_{index}.png", padded)
+            
+            # Read the text from the zone with 'easyocr'
+            ocrResult = reader_instance.readtext(
+                enhanced,
+                decoder='beamsearch',
+                contrast_ths=0.05,
+                adjust_contrast=0.7,
+                text_threshold=0.5, # Lowered from 0.6
+                low_text=0.3,       # Lowered from 0.4
+                mag_ratio=1.0,       # We already upscaled
+                link_threshold=0.5
+            )
+
+            # cprint("OCR result", 'green')
+            # print(ocrResult)
+            # cprint("----------------------\n", 'green')
+
+            counter = 0
+            for (bbox, text, probability) in ocrResult:
+                if probability >= 0.5:   # Lowered threshold slightly to catch more potential matches
+                    result[index][counter] = {'text': text, 'coordinates': bbox}
+                    counter += 1
+
+    def paddleOCR(self, image, zones, result, reader_instance):
+        """Use PaddleOCR on detected zones to extract the text in it using the same logic as in the OCR function"""
+
+        for index in zones:
+            result[index] = {}
+            (x, y, w, h) = zones[index]['box']
+            xOrigin = x - w/2
+            yOrigin = y - h/2
+            
+            # Extract region of interest
+            regionOfInterest = image[int(yOrigin) : int(y+h), int(xOrigin) : int(x+w)]
+
+            if regionOfInterest.size == 0:
+                continue
+
+            # --- Preprocessing for better OCR accuracy ---
+            # 1. Convert to grayscale
+            gray = cv2.cvtColor(regionOfInterest, cv2.COLOR_BGR2GRAY)
+
+            # 2. Upscale the image (3x helps with small text)
+            scale_factor = 3
+            upscaled = cv2.resize(gray, None, fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_CUBIC)
+
+            # 3. Add padding (white border) - critical for text touching edges
+            # Add 10px white border (assuming grayscale 255 is white)
+            padding = 10
+            padded = cv2.copyMakeBorder(upscaled, padding, padding, padding, padding, cv2.BORDER_CONSTANT, value=255)
+
+            # 4. Optional: Denoising / Thresholding (can sometimes help, but easyocr handles some internally)
+            threshold = cv2.threshold(padded, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+
+            # 5. Optional: Noise Reduction (can help with very noisy images)
+            denoised = cv2.fastNlMeansDenoising(threshold, None, h=10, templateWindowSize=7, searchWindowSize=21)
+            
+            # 6. Optional: Image Enhancement (can help with low contrast)
+            enhanced = cv2.equalizeHist(denoised)
+
+            # 7 Increase contrast
+            enhanced = cv2.convertScaleAbs(enhanced, alpha=2, beta=0)
+            
+            # Debug: save processed image (optional)
+            # cv2.imwrite(f"debug_ocr_{index}.png", padded)
+            
+            # Read the text from the zone with 'easyocr'
+            ocrResult = reader_instance.predict(regionOfInterest)
+
+            cprint("OCR result", 'green')
+            for idx in range(len(ocrResult)):
+                res = ocrResult[idx]
+                print(res.get('rec_texts'))
+                print(res.get('rec_scores'))
+                print(res.get('rec_polys'))
+
+                counter = 0
+                for idx, text in enumerate(res.get('rec_texts')):
+                    if res.get('rec_scores')[idx] >= 0.5:   # Lowered threshold slightly to catch more potential matches
+                        result[index][counter] = {'text': text, 'coordinates': res.get('rec_polys')[idx].tolist()}
+                        counter += 1
+            cprint("----------------------\n", 'green')
 
     def closest_to_the_link(self, link):
         """Determine la distance la plus faible entre le lien et la zone de texte
@@ -1030,11 +1107,14 @@ class TopologyData:
 
         return textOnLinks
     
-    def text_treatment(self):
+    def process_text(self):
         """
         Process the extracted text and links data to create a topology data structure
         """
         extracted_text = self.extractedTextForEquipmentZones
+        cprint("Extracted text", 'green')
+        print(extracted_text)
+        cprint("----------------------\n", 'green')
         links_text = self.textOnLinks
         
         filtered_text = {}
@@ -1066,9 +1146,8 @@ class TopologyData:
                         else:
                             filtered_text[zone_index]['ip_address'] = text
                     case 'incomplete_ip':
-                        closest_link, _ = self.closest_to_the_box(text_entry.get('coordinates'), zoneLinks)
-
                         cprint(f"\nINCOMPLETE IP: {text}", 'yellow')
+                        closest_link, _ = self.closest_to_the_box(text_entry.get('coordinates'), zoneLinks)
 
                         if closest_link is None:
                             continue
@@ -1112,21 +1191,31 @@ class TopologyData:
         netmask = network.netmask
         prefix_len = network.prefixlen
 
+        cprint(f"NETWORK ADDRESS: {network_add}", 'yellow')
+        cprint(f"NETMASK: {netmask}", 'yellow')
+        cprint(f"PREFIX LENGTH: {prefix_len}", 'yellow')
+
         # Remove CIDR mask from incomplete_ip if present
         if '/' in incomplete_ip:
             incomplete_ip = str(incomplete_ip).split('/')[0]
         
         incomplete_ip_list = str(incomplete_ip).split('.')
-        incomplete_ip_list = [el for el in incomplete_ip_list if el != ' ' or el != '']
+        incomplete_ip_list = [el for el in incomplete_ip_list if el != '']
+
+        cprint(f"INCOMPLETE IP LIST: {incomplete_ip_list}", 'yellow')
 
         # Determine the host part
         network_add_list = str(network_add).split('.')
         netmask_list = str(netmask).split('.')
+
+        cprint(f"NETWORK ADDRESS LIST: {network_add_list}", 'yellow')
+        cprint(f"NETMASK LIST: {netmask_list}", 'yellow')
         
         for i, mask in enumerate(netmask_list):
             if mask != '255':
                 step = 256 - int(mask) # Determine possible host values range
                 hostbytes = len(incomplete_ip_list)
+                print(hostbytes)
                 match i:
                     # Return complete address
                     case 0:
